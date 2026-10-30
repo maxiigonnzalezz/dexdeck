@@ -1629,24 +1629,31 @@ async function removeSelectedGame() {
   }
 
   :global(html[data-theme='glass']) {
-    --dd-app-bg: transparent;
-    --dd-sidebar-bg: rgba(17, 25, 25, 0.68);
-    --dd-surface: rgba(26, 38, 37, 0.62);
-    --dd-surface-raised: rgba(52, 71, 68, 0.58);
-    --dd-card-bg: rgba(21, 33, 32, 0.62);
-    --dd-header-bg: rgba(17, 25, 25, 0.58);
-    --dd-text: #f0f4f5;
-    --dd-muted: #c0d0cb;
-    --dd-border: rgba(226, 255, 244, 0.2);
-    --dd-accent: #62e6c2;
-    --dd-accent-hover: #82efd3;
-    --dd-accent-text: #10231e;
-    --dd-control-bg: rgba(8, 16, 15, 0.42);
-    --dd-soft: rgba(255, 255, 255, 0.075);
-    --dd-blur: blur(18px) saturate(145%);
-    --dd-modal-bg: linear-gradient(145deg, rgba(30, 45, 43, 0.88), rgba(17, 27, 26, 0.9));
-    color-scheme: dark;
-  }
+  /* Neutral charcoal base: no purple/blue colour wash. */
+  --dd-app-bg: rgba(10, 14, 17, 0.46);
+  --dd-sidebar-bg: rgba(22, 28, 31, 0.70);
+  --dd-surface: rgba(232, 239, 236, 0.075);
+  --dd-surface-raised: rgba(241, 247, 244, 0.13);
+  --dd-card-bg: rgba(22, 29, 32, 0.52);
+  --dd-header-bg: rgba(17, 23, 26, 0.66);
+
+  --dd-text: #f3f7f5;
+  --dd-muted: #c2ceca;
+  --dd-border: rgba(239, 247, 243, 0.19);
+  --dd-accent: #a6e7d5;
+  --dd-accent-hover: #c0f2e5;
+  --dd-accent-text: #10231e;
+  --dd-control-bg: rgba(12, 18, 20, 0.48);
+  --dd-soft: rgba(237, 245, 241, 0.075);
+
+  --dd-blur: blur(26px) saturate(138%);
+  --dd-modal-bg: linear-gradient(
+    145deg,
+    rgba(48, 58, 58, 0.88),
+    rgba(20, 27, 29, 0.92)
+  );
+  color-scheme: dark;
+}
 
   :global(body) {
     margin: 0;
@@ -2144,4 +2151,237 @@ async function removeSelectedGame() {
   .game-configure-button:hover { transform: translateY(-1px); filter: brightness(1.08); }
   .game-configure-button:active { transform: scale(.99); }
 
-</style>
+  /* DEXDECK LIQUID GLASS REFINEMENT v2 — PEARL DROPLETS */
+
+/* The full window acts as a frosted, neutral veil over the desktop. */
+.app-shell[data-theme='glass'] {
+  position: relative;
+  isolation: isolate;
+  background: var(--dd-app-bg) !important;
+  backdrop-filter: blur(30px) saturate(142%);
+  -webkit-backdrop-filter: blur(30px) saturate(142%);
+}
+
+/* A faint pearly light falloff, like light passing through thick glass. */
+.app-shell[data-theme='glass']::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 12% 0%, rgba(255, 255, 255, 0.105), transparent 38%),
+    radial-gradient(ellipse at 88% 100%, rgba(218, 235, 229, 0.055), transparent 42%);
+}
+
+/* Larger surfaces: smoky pearl glass, with a soft inner highlight. */
+.app-shell[data-theme='glass'] .runner-card,
+.app-shell[data-theme='glass'] .stat-card,
+.app-shell[data-theme='glass'] .game-card,
+.app-shell[data-theme='glass'] .search-box,
+.app-shell[data-theme='glass'] .settings-panel,
+.app-shell[data-theme='glass'] .setting-row,
+.app-shell[data-theme='glass'] .placeholder-panel,
+.app-shell[data-theme='glass'] .tip-banner,
+.app-shell[data-theme='glass'] .empty-state,
+.app-shell[data-theme='glass'] .notice {
+  border-color: rgba(238, 247, 243, 0.20);
+  background: linear-gradient(
+    145deg,
+    rgba(235, 243, 239, 0.105),
+    rgba(172, 188, 182, 0.045) 46%,
+    rgba(12, 19, 21, 0.34)
+  );
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.17),
+    inset 0 -1px rgba(0, 0, 0, 0.12),
+    0 10px 28px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(22px) saturate(142%);
+  -webkit-backdrop-filter: blur(22px) saturate(142%);
+}
+
+.app-shell[data-theme='glass'] .game-card {
+  background: linear-gradient(
+    145deg,
+    rgba(225, 235, 231, 0.12),
+    rgba(125, 143, 137, 0.045) 48%,
+    rgba(10, 16, 18, 0.42)
+  ) !important;
+}
+
+/* Frosted controls: neutral white-silver, not coloured glass. */
+.app-shell[data-theme='glass'] .secondary-button,
+.app-shell[data-theme='glass'] .icon-button,
+.app-shell[data-theme='glass'] .modal-close,
+.app-shell[data-theme='glass'] .game-menu,
+.app-shell[data-theme='glass'] .path-button,
+.app-shell[data-theme='glass'] .theme-option {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: #f0f5f2;
+  background: linear-gradient(
+    145deg,
+    rgba(250, 255, 252, 0.17),
+    rgba(203, 216, 210, 0.075) 52%,
+    rgba(20, 28, 29, 0.16)
+  );
+  border: 1px solid rgba(246, 252, 249, 0.25);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.26),
+    inset 0 -1px rgba(0, 0, 0, 0.09),
+    0 6px 18px rgba(0, 0, 0, 0.12);
+  backdrop-filter: blur(20px) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+}
+
+/* Small specular spots create the rounded, liquid-droplet highlight. */
+.app-shell[data-theme='glass'] .secondary-button::before,
+.app-shell[data-theme='glass'] .icon-button::before,
+.app-shell[data-theme='glass'] .primary-button::before,
+.app-shell[data-theme='glass'] .play-button::before,
+.app-shell[data-theme='glass'] .theme-option::before,
+.app-shell[data-theme='glass'] .enc-primary-button::before,
+.app-shell[data-theme='glass'] .enc-secondary-button::before {
+  content: "";
+  position: absolute;
+  top: -11px;
+  left: 12%;
+  width: 43%;
+  height: 24px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(ellipse, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.07) 48%, transparent 76%);
+  filter: blur(5px);
+  opacity: 0.9;
+}
+
+.app-shell[data-theme='glass'] .primary-button,
+.app-shell[data-theme='glass'] .play-button.play-button-ready {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: #f3fbf7 !important;
+  background: linear-gradient(
+    145deg,
+    rgba(231, 246, 239, 0.26),
+    rgba(157, 190, 177, 0.13) 55%,
+    rgba(23, 43, 37, 0.27)
+  ) !important;
+  border: 1px solid rgba(235, 255, 246, 0.34);
+  box-shadow:
+    inset 0 1px rgba(255, 255, 255, 0.32),
+    inset 0 -1px rgba(0, 0, 0, 0.10),
+    0 7px 22px rgba(0, 0, 0, 0.17);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+}
+
+.app-shell[data-theme='glass'] .primary-button:hover:not(:disabled),
+.app-shell[data-theme='glass'] .secondary-button:hover,
+.app-shell[data-theme='glass'] .icon-button:hover,
+.app-shell[data-theme='glass'] .play-button:hover:not(:disabled),
+.app-shell[data-theme='glass'] .theme-option:hover {
+  filter: brightness(1.13);
+  border-color: rgba(255, 255, 255, 0.43);
+}
+
+.app-shell[data-theme='glass'] .danger-button {
+  background: linear-gradient(145deg, rgba(231, 105, 112, 0.62), rgba(118, 38, 49, 0.48));
+  border-color: rgba(255, 220, 220, 0.28);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.23), 0 6px 18px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+/* Navigation: subtle translucent pills and a restrained mint active state. */
+.app-shell[data-theme='glass'] .nav-item {
+  border-color: transparent;
+}
+.app-shell[data-theme='glass'] .nav-item:hover {
+  background: linear-gradient(110deg, rgba(255,255,255,0.105), rgba(220,232,226,0.035));
+  border-color: rgba(255,255,255,0.10);
+}
+.app-shell[data-theme='glass'] .nav-item.active {
+  background: linear-gradient(110deg, rgba(222, 242, 234, 0.16), rgba(255,255,255,0.045));
+  border-color: rgba(239, 250, 245, 0.20);
+  box-shadow:
+    inset 3px 0 rgba(166, 231, 213, 0.90),
+    inset 0 1px rgba(255,255,255,0.18),
+    0 5px 18px rgba(0,0,0,0.10);
+}
+.app-shell[data-theme='glass'] .nav-item.active .nav-icon {
+  color: #c6f1e3;
+}
+
+.app-shell[data-theme='glass'] .search-box:focus-within {
+  border-color: rgba(226, 246, 237, 0.43);
+  box-shadow: 0 0 0 3px rgba(226, 246, 237, 0.085), inset 0 1px rgba(255,255,255,0.16);
+}
+
+/* Encyclopedia uses the same pearl-grey glass material. */
+:global(.app-shell[data-theme='glass'] .encyclopedia) {
+  --enc-panel: rgba(229, 239, 234, 0.085);
+  --enc-panel-strong: rgba(238, 246, 242, 0.14);
+  --enc-border: rgba(239, 247, 243, 0.20);
+  --enc-muted: #c2ceca;
+  --enc-input: rgba(12, 18, 20, 0.50);
+}
+
+:global(.app-shell[data-theme='glass'] .enc-game-card),
+:global(.app-shell[data-theme='glass'] .enc-stat),
+:global(.app-shell[data-theme='glass'] .enc-empty-panel),
+:global(.app-shell[data-theme='glass'] .enc-info-panel),
+:global(.app-shell[data-theme='glass'] .enc-search-wrap) {
+  border-color: rgba(239, 247, 243, 0.20);
+  background: linear-gradient(145deg, rgba(237,245,241,0.12), rgba(15,23,24,0.30));
+  box-shadow: inset 0 1px rgba(255,255,255,0.16), 0 8px 24px rgba(0,0,0,0.10);
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+}
+
+:global(.app-shell[data-theme='glass'] .enc-primary-button),
+:global(.app-shell[data-theme='glass'] .enc-secondary-button),
+:global(.app-shell[data-theme='glass'] .enc-close-button) {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  color: #f0f7f3 !important;
+  background: linear-gradient(145deg, rgba(244,250,247,0.19), rgba(161,182,173,0.08) 58%, rgba(17,29,27,0.22)) !important;
+  border: 1px solid rgba(245,252,248,0.28);
+  box-shadow: inset 0 1px rgba(255,255,255,0.25), 0 6px 18px rgba(0,0,0,0.13);
+  backdrop-filter: blur(20px) saturate(145%);
+  -webkit-backdrop-filter: blur(20px) saturate(145%);
+}
+
+:global(.app-shell[data-theme='glass'] .enc-tabs button.active),
+:global(.app-shell[data-theme='glass'] .enc-filter-row button.active) {
+  background: rgba(220, 242, 232, 0.15);
+  border-color: rgba(230, 249, 240, 0.30);
+  box-shadow: inset 0 1px rgba(255,255,255,0.17);
+}
+
+:global(.app-shell[data-theme='glass'] .enc-modal) {
+  color: #f0f6f2;
+  background: linear-gradient(145deg, rgba(55,65,63,0.91), rgba(20,27,28,0.94));
+  border-color: rgba(239,247,243,0.25);
+  box-shadow: inset 0 1px rgba(255,255,255,0.19), 0 24px 80px rgba(0,0,0,0.42);
+  backdrop-filter: blur(30px) saturate(140%);
+  -webkit-backdrop-filter: blur(30px) saturate(140%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .app-shell[data-theme='glass'] {
+    --dd-app-bg: #171e20;
+    --dd-sidebar-bg: #202829;
+    --dd-surface: #293231;
+    --dd-card-bg: #232c2c;
+    --dd-header-bg: #1d2526;
+    --dd-blur: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+
+  </style>
