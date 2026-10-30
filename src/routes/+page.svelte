@@ -4,10 +4,13 @@
       listGames,
       updateGame,
       type Game,
-      type GameInput
+      type GameInput,
+      hideGame,
+      importHiddenGames,
   } from '$lib/db';
   import { open } from '@tauri-apps/plugin-dialog';
   import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount } from 'svelte';
   import Encyclopedia from '$lib/components/Encyclopedia.svelte';
 
@@ -39,6 +42,13 @@
     companyName: string | null;
     description: string | null;
   };
+
+  // DEXDECK MULTIPLATFORM UI v1
+  type SystemInfo = {
+    os: string;
+    osName: string;
+    architecture: string;
+  };
   let newType = $state('Fangame');
   let newStatus = $state('En biblioteca');
   let newColor = $state('blue');
@@ -52,6 +62,7 @@
   type ThemeName = 'light' | 'dark' | 'glass';
   let theme = $state<ThemeName>('dark');
   let launchingGameId = $state<number | null>(null);
+  let systemInfo = $state<SystemInfo | null>(null);
 
   const navigation = [
     { label: 'Biblioteca', icon: '▦' },
@@ -68,6 +79,7 @@
     }
     applyTheme(theme, false);
     void loadGames();
+    void loadSystemInfo();
   });
 
   function applyTheme(nextTheme: ThemeName, persist = true) {
@@ -107,11 +119,38 @@
   }
 
 
+  async function exitApp() {
+    try {
+      await getCurrentWindow().close();
+    } catch (error) {
+      console.error('No se pudo cerrar DexDeck:', error);
+      notice = 'No se pudo cerrar DexDeck. Inténtalo de nuevo.';
+    }
+  }
+
+  async function loadSystemInfo() {
+    try {
+      systemInfo = await invoke<SystemInfo>('get_system_info');
+    } catch (error) {
+      console.warn('No se pudo detectar el sistema operativo:', error);
+      systemInfo = { os: 'unknown', osName: 'Desconocido', architecture: 'Desconocida' };
+    }
+  }
+
   async function loadGames() {
     try {
-      const loadedGames = await listGames();
+      // Migrar a SQLite los IDs ocultos que quedaron en el almacenamiento antiguo.
       const removedIds = getRemovedGameIds();
-      games = loadedGames.filter((game) => !removedIds.has(String(game.id)));
+
+      if (removedIds.size > 0) {
+        await importHiddenGames([...removedIds]);
+      }
+
+      // No borrar el valor antiguo hasta que la importación a SQLite haya terminado.
+      window.localStorage.removeItem(REMOVED_GAME_IDS_KEY);
+
+      // SQLite es la única fuente de verdad para la biblioteca.
+      games = await listGames();
     } catch (error) {
       console.error('Error al cargar la biblioteca:', error);
       notice = 'No se pudo cargar la biblioteca. Comprueba la base de datos.';
@@ -529,7 +568,9 @@
       console.error('Error al iniciar el juego:', error);
       notice = typeof error === 'string'
         ? error
-        : `No se pudo iniciar ${game.name}. Comprueba el ejecutable y la configuración de Wine.`;
+        : systemInfo?.os === 'linux'
+          ? `No se pudo iniciar ${game.name}. Comprueba el ejecutable y que Wine esté instalado.`
+          : `No se pudo iniciar ${game.name}. Comprueba la ruta y la compatibilidad del archivo.`;
     } finally {
       launchingGameId = null;
     }
@@ -588,25 +629,24 @@
     showRemoveConfirm = false;
   }
 async function removeSelectedGame() {
-    const gameToRemove = selectedGame;
-    if (!gameToRemove) return;
+  const gameToRemove = selectedGame;
+  if (!gameToRemove) return;
 
-    try {
-      const removedIds = getRemovedGameIds();
-      removedIds.add(String(gameToRemove.id));
-      window.localStorage.setItem(REMOVED_GAME_IDS_KEY, JSON.stringify([...removedIds]));
+  try {
+    // Guardar el cambio directamente en SQLite.
+    await hideGame(gameToRemove.id);
 
-      games = games.filter((game) => String(game.id) !== String(gameToRemove.id));
-      selectedGame = null;
-      showRemoveConfirm = false;
-      gameDialog?.close();
-      notice = `${gameToRemove.name} se ha quitado de la biblioteca y el cambio se conservará al volver a abrir DexDeck.`;
-    } catch (error) {
-      console.error('No se pudo guardar el cambio de biblioteca:', error);
-      notice = 'No se pudo guardar el cambio. Comprueba el almacenamiento de la aplicación e inténtalo de nuevo.';
-    }
+    games = games.filter((game) => game.id !== gameToRemove.id);
+    selectedGame = null;
+    showRemoveConfirm = false;
+    gameDialog?.close();
+
+    notice = `${gameToRemove.name} se ha quitado de la biblioteca.`;
+  } catch (error) {
+    console.error('No se pudo quitar el juego de la biblioteca:', error);
+    notice = 'No se pudo guardar el cambio. Inténtalo de nuevo.';
   }
-
+}
   function prepareSelectedGame() {
     if (!selectedGame) return;
 
@@ -662,11 +702,15 @@ async function removeSelectedGame() {
           <span class="runner-dot"></span>
           <span>ENTORNO DE JUEGO</span>
         </div>
-        <div class="runner-name">Wine</div>
-        <div class="runner-description">La compatibilidad se comprobará en tu sistema.</div>
+        <div class="runner-name">
+          {#if systemInfo?.os === 'windows'}Windows nativo{:else if systemInfo?.os === 'linux'}Wine{:else if systemInfo?.os === 'macos'}macOS{:else}Detectando...{/if}
+        </div>
+        <div class="runner-description">
+          {#if systemInfo?.os === 'windows'}Los ejecutables .exe se inician directamente.{:else if systemInfo?.os === 'linux'}Wine permite ejecutar juegos de Windows; debe estar instalado.{:else if systemInfo?.os === 'macos'}La compatibilidad con juegos de Windows está pendiente.{:else}La compatibilidad se comprobará en tu sistema.{/if}
+        </div>
         <div class="runner-status">
           <span class="status-indicator"></span>
-          <span>Configuración pendiente</span>
+          <span>{#if systemInfo?.os === 'windows'}Lanzamiento nativo{:else if systemInfo?.os === 'linux'}Wine necesario para .exe{:else}Compatibilidad pendiente{/if}</span>
         </div>
       </div>
 
@@ -679,6 +723,16 @@ async function removeSelectedGame() {
         <span class="profile-menu">···</span>
       </div>
     </div>
+    <button
+      type="button"
+      class="nav-item exit-button"
+      title="Cerrar DexDeck"
+      aria-label="Salir de DexDeck"
+      onclick={exitApp}
+    >
+      <span class="nav-icon" aria-hidden="true">⇥</span>
+      <span>Salir</span>
+    </button>
   </aside>
 
   <main class="main-content">
@@ -744,7 +798,7 @@ async function removeSelectedGame() {
             <div class="stat-icon cyan">◈</div>
             <div>
               <div class="stat-label">PLATAFORMA</div>
-              <div class="stat-value">Linux <span>· CachyOS</span></div>
+              <div class="stat-value">{systemInfo?.osName ?? 'Detectando...'} <span>· {systemInfo?.architecture ?? '...'}</span></div>
             </div>
           </div>
           <div class="stat-card">
@@ -967,17 +1021,17 @@ async function removeSelectedGame() {
             <div class="setting-icon">⌘</div>
             <div class="setting-copy">
               <strong>Plataforma</strong>
-              <p>Diseñado inicialmente para CachyOS.</p>
+              <p>{systemInfo ? `Detectado automáticamente: ${systemInfo.osName} (${systemInfo.architecture}).` : 'Detectando el sistema operativo...'}</p>
             </div>
-            <span class="setting-value">Linux</span>
+            <span class="setting-value">{systemInfo?.osName ?? 'Detectando...'}</span>
           </div>
           <div class="setting-row">
             <div class="setting-icon">◇</div>
             <div class="setting-copy">
               <strong>Compatibilidad</strong>
-              <p>La configuración de Wine se añadirá más adelante.</p>
+              <p>{#if systemInfo?.os === 'windows'}Los ejecutables .exe se inician de forma nativa.{:else if systemInfo?.os === 'linux'}Wine es necesario para ejecutar juegos de Windows.{:else}La configuración de motores externos se añadirá más adelante.{/if}</p>
             </div>
-            <span class="setting-value pending">Pendiente</span>
+            <span class="setting-value pending">{#if systemInfo?.os === 'windows'}Nativo{:else if systemInfo?.os === 'linux'}Wine externo{:else}Pendiente{/if}</span>
           </div>
         </div>
       {/if}
@@ -1075,7 +1129,7 @@ async function removeSelectedGame() {
       <div class="form-label full-width">
         <label for="executable-path">Ruta del ejecutable</label>
         <div class="path-input-row">
-          <input id="executable-path" bind:value={newExecutablePath} placeholder="/home/maxi/Juegos/NombreDelJuego/Game.exe" maxlength="1000" onchange={() => autofillExecutableFields(newExecutablePath)} />
+          <input id="executable-path" bind:value={newExecutablePath} placeholder={systemInfo?.os === 'windows' ? 'C:\\Juegos\\NombreDelJuego\\Game.exe' : '/home/usuario/Juegos/NombreDelJuego/Game.exe'} maxlength="1000" onchange={() => autofillExecutableFields(newExecutablePath)} />
           <button type="button" class="path-button" onclick={() => void chooseExecutablePath()}>Elegir archivo</button>
         </div>
         <span class="field-help">Al elegir un ejecutable, DexDeck intenta detectar el nombre y la versión de los archivos Windows (.exe), y calcula la carpeta raíz desde su ruta. Los campos siguen siendo editables.</span>
@@ -1087,7 +1141,7 @@ async function removeSelectedGame() {
       <div class="form-label full-width">
         <label for="install-path">Ruta de instalación</label>
         <div class="path-input-row">
-          <input id="install-path" bind:value={newInstallPath} placeholder="/home/maxi/Juegos/NombreDelJuego" maxlength="1000" oninput={() => (installPathManuallyEdited = true)} />
+          <input id="install-path" bind:value={newInstallPath} placeholder={systemInfo?.os === 'windows' ? 'C:\\Juegos\\NombreDelJuego' : '/home/usuario/Juegos/NombreDelJuego'} maxlength="1000" oninput={() => (installPathManuallyEdited = true)} />
           <button type="button" class="path-button" onclick={() => void chooseInstallPath()}>Elegir carpeta</button>
         </div>
         <span class="field-help">Selecciona la carpeta donde se encuentran los archivos del juego. También puedes escribir la ruta manualmente.</span>
@@ -2384,4 +2438,15 @@ async function removeSelectedGame() {
 }
 
 
-  </style>
+
+  .app-shell .exit-button {
+    margin-top: 12px;
+    color: #e58b91;
+    border-color: rgba(229, 139, 145, 0.18);
+  }
+  .app-shell .exit-button:hover {
+    color: #fff;
+    background: rgba(190, 48, 65, 0.16);
+    border-color: rgba(229, 139, 145, 0.38);
+  }
+</style>

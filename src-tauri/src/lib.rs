@@ -2,9 +2,10 @@
 mod executable_metadata;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-
+use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
+// DEXDECK MULTIPLATFORM SUPPORT v1
 #[tauri::command]
 fn launch_game(
     executable_path: String,
@@ -60,37 +61,119 @@ fn launch_game(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"));
 
-    let result = if is_windows_executable {
-        Command::new("wine")
-            .arg(&executable)
-            .current_dir(&working_directory)
+    launch_platform_executable(&executable, &working_directory, is_windows_executable)
+}
+
+fn spawn_native_executable(executable: &Path, working_directory: &Path) -> Result<(), String> {
+    let _child = Command::new(executable)
+        .current_dir(working_directory)
+        .spawn()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::PermissionDenied {
+                format!(
+                    "No tienes permisos para ejecutar el archivo. Comprueba sus permisos: {}",
+                    executable.display()
+                )
+            } else {
+                format!("No se pudo iniciar el juego: {error}")
+            }
+        })?;
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn launch_platform_executable(
+    executable: &Path,
+    working_directory: &Path,
+    is_windows_executable: bool,
+) -> Result<(), String> {
+    if is_windows_executable {
+        let _child = Command::new("wine")
+            .arg(executable)
+            .current_dir(working_directory)
             .spawn()
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::NotFound {
-                    "No se encuentra Wine. Instálalo para ejecutar juegos de Windows."
-                        .to_string()
+                    "No se encuentra Wine. Instálalo para ejecutar juegos de Windows.".to_string()
                 } else {
                     format!("No se pudo iniciar el juego con Wine: {error}")
                 }
-            })?
+            })?;
+        Ok(())
     } else {
-        Command::new(&executable)
-            .current_dir(&working_directory)
-            .spawn()
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::PermissionDenied {
-                    format!(
-                        "No tienes permisos para ejecutar el archivo. Comprueba sus permisos: {}",
-                        executable.display()
-                    )
-                } else {
-                    format!("No se pudo iniciar el juego: {error}")
-                }
-            })?
+        spawn_native_executable(executable, working_directory)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn launch_platform_executable(
+    executable: &Path,
+    working_directory: &Path,
+    _is_windows_executable: bool,
+) -> Result<(), String> {
+    // Windows ejecuta sus programas directamente; no requiere Wine.
+    spawn_native_executable(executable, working_directory)
+}
+
+#[cfg(target_os = "macos")]
+fn launch_platform_executable(
+    executable: &Path,
+    working_directory: &Path,
+    is_windows_executable: bool,
+) -> Result<(), String> {
+    if is_windows_executable {
+        return Err(
+            "Los ejecutables .exe no se pueden iniciar de forma nativa en macOS. La compatibilidad con Wine está pendiente.".into(),
+        );
+    }
+    spawn_native_executable(executable, working_directory)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
+fn launch_platform_executable(
+    executable: &Path,
+    working_directory: &Path,
+    is_windows_executable: bool,
+) -> Result<(), String> {
+    if is_windows_executable {
+        return Err("La ejecución de archivos .exe no está configurada para este sistema operativo.".into());
+    }
+    spawn_native_executable(executable, working_directory)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemInfo {
+    os: String,
+    os_name: String,
+    architecture: String,
+}
+
+#[tauri::command]
+fn get_system_info() -> SystemInfo {
+    let os = std::env::consts::OS;
+    let os_name = match os {
+        "linux" => "Linux",
+        "windows" => "Windows",
+        "macos" => "macOS",
+        "android" => "Android",
+        "ios" => "iOS",
+        _ => "Sistema desconocido",
+    };
+    let architecture = match std::env::consts::ARCH {
+        "x86_64" => "x86_64",
+        "aarch64" => "ARM64",
+        "x86" => "x86",
+        "arm" => "ARM",
+        other => other,
     };
 
-    drop(result);
-    Ok(())
+    SystemInfo {
+        os: os.to_string(),
+        os_name: os_name.to_string(),
+        architecture: architecture.to_string(),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -162,9 +245,29 @@ pub fn run() {
             sql: include_str!("migrations/0008_pokedex_foundation.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 9,
+            description: "add_game_hidden_state",
+            sql: "
+                ALTER TABLE games
+                ADD COLUMN is_hidden INTEGER NOT NULL DEFAULT 0;
+            ",
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
+        .setup(|app| {
+            // DevTools solo durante el desarrollo.
+            #[cfg(debug_assertions)]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.open_devtools();
+                }
+            }
+
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -172,7 +275,9 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![launch_game,
+        .invoke_handler(tauri::generate_handler![
+            launch_game,
+            get_system_info,
             executable_metadata::inspect_game_executable
         ])
         .run(tauri::generate_context!())

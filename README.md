@@ -16,6 +16,28 @@
 
 ---
 
+<!-- DEXDECK-DOWNLOADS:START -->
+## ⬇️ Descargas
+
+Descarga la última versión estable de DexDeck. Los enlaces se actualizan automáticamente cuando se publica una nueva versión en GitHub Releases.
+
+| Sistema | Formato | Descarga |
+|---|---|---|
+| Linux x64 | AppImage | [Descargar](https://github.com/maxiigonnzalezz/dexdeck/releases/latest/download/DexDeck-Linux-x64.AppImage) |
+| Linux x64 (Debian, Ubuntu y derivadas) | `.deb` | [Descargar](https://github.com/maxiigonnzalezz/dexdeck/releases/latest/download/DexDeck-Linux-x64.deb) |
+| Windows x64 | Instalador `.exe` (NSIS) | [Descargar](https://github.com/maxiigonnzalezz/dexdeck/releases/latest/download/DexDeck-Windows-x64-Setup.exe) |
+
+[Ver todas las versiones y sus notas de publicación](https://github.com/maxiigonnzalezz/dexdeck/releases).
+
+**AppImage:** después de descargarlo, puede ser necesario permitir su ejecución:
+
+```bash
+chmod +x DexDeck-Linux-x64.AppImage
+./DexDeck-Linux-x64.AppImage
+```
+
+<!-- DEXDECK-DOWNLOADS:END -->
+
 ## ✨ La idea
 
 DexDeck nace para convertirse en el espacio de referencia de quienes disfrutan explorando el universo de los videojuegos Pokémon.

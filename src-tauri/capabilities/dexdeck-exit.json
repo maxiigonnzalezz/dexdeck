@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dexdeck-exit",
+  "description": "Permite al botón Salir cerrar la ventana principal de DexDeck.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:window:allow-close"
+  ]
+}

@@ -27,6 +27,11 @@ export type CatalogGameInput = {
   platform: string;
 };
 
+export type CatalogGameUpdateInput = Pick<
+  CatalogGameInput,
+  'slug' | 'name' | 'developer' | 'game_type' | 'description' | 'cover_url' | 'official_url'
+>;
+
 export type CatalogGameVersion = {
   id: number;
   catalog_game_id: number;
@@ -196,4 +201,42 @@ export async function createCatalogGame(input: CatalogGameInput): Promise<number
   }
 
   return catalogGameId;
+}
+
+
+export async function updateCatalogGame(
+  catalogGameId: number,
+  input: CatalogGameUpdateInput
+): Promise<void> {
+  const db = await getDatabase();
+  const slug = input.slug.trim();
+  const name = input.name.trim();
+
+  if (!name || !slug) {
+    throw new Error('El nombre y el identificador son obligatorios.');
+  }
+
+  // Solo actualiza los metadatos generales. Las versiones y sus datos asociados
+  // permanecen intactos.
+  await db.execute(`
+    UPDATE catalog_games SET
+      slug = $1,
+      name = $2,
+      developer = $3,
+      game_type = $4,
+      description = $5,
+      cover_url = $6,
+      official_url = $7,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $8
+  `, [
+    slug,
+    name,
+    input.developer.trim() || 'Desarrollador desconocido',
+    input.game_type,
+    input.description.trim(),
+    input.cover_url.trim(),
+    input.official_url.trim(),
+    catalogGameId
+  ]);
 }

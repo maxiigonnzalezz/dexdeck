@@ -15,9 +15,10 @@ export type Game = {
   official_url: string;
   install_path: string;
   executable_path: string;
+  is_hidden: number;
 };
 
-export type GameInput = Omit<Game, 'id'>;
+export type GameInput = Omit<Game, 'id' | 'is_hidden'>;
 
 let databasePromise: Promise<Database> | undefined;
 
@@ -49,8 +50,10 @@ export async function listGames(): Promise<Game[]> {
       cover,
       official_url,
       install_path,
-      executable_path
+      executable_path,
+      is_hidden
     FROM games
+    WHERE is_hidden = 0
     ORDER BY id DESC`
   );
 }
@@ -129,4 +132,29 @@ export async function updateGame(
       id
     ]
   );
+}
+export async function hideGame(id: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.execute(
+    'UPDATE games SET is_hidden = 1 WHERE id = $1',
+    [id]
+  );
+}
+
+export async function importHiddenGames(ids: string[]): Promise<void> {
+  const db = await getDatabase();
+
+  for (const rawId of ids) {
+    const id = Number(rawId);
+
+    if (!Number.isSafeInteger(id) || id <= 0) {
+      continue;
+    }
+
+    await db.execute(
+      'UPDATE games SET is_hidden = 1 WHERE id = $1',
+      [id]
+    );
+  }
 }

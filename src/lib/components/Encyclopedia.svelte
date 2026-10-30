@@ -1,10 +1,12 @@
 <script lang="ts">
   import {
       createCatalogGame,
+      updateCatalogGame,
       getVersionSummary,
       listCatalogGameVersions,
       listCatalogGames,
       type CatalogGame,
+      type CatalogGameUpdateInput,
       type CatalogGameType,
       type CatalogGameVersion,
       type VersionSummary
@@ -22,6 +24,7 @@
   let pageError = $state('');
   let formError = $state('');
   let showForm = $state(false);
+  let editingGameId = $state<number | null>(null);
   let selectedGame = $state<CatalogGame | null>(null);
   let versions = $state<CatalogGameVersion[]>([]);
   let selectedVersionId = $state<number | null>(null);
@@ -83,6 +86,7 @@
   }
 
   function resetDraft() {
+    editingGameId = null;
     draft = {
       name: '',
       slug: '',
@@ -97,25 +101,47 @@
     formError = '';
   }
 
-  async function handleCreate(event: SubmitEvent) {
+  async function handleSave(event: SubmitEvent) {
     event.preventDefault();
     formError = '';
 
-    if (!draft.name.trim() || !draft.slug.trim() || !draft.version_label.trim()) {
-      formError = 'Completa el nombre, el identificador y la versión inicial.';
+    const isEditing = editingGameId !== null;
+    if (!draft.name.trim() || !draft.slug.trim() || (!isEditing && !draft.version_label.trim())) {
+      formError = isEditing
+        ? 'Completa el nombre y el identificador.'
+        : 'Completa el nombre, el identificador y la versión inicial.';
       return;
     }
 
     saving = true;
     try {
-      const id = await createCatalogGame({ ...draft });
-      showForm = false;
-      resetDraft();
-      await refreshCatalog();
-      const created = games.find((game) => game.id === id);
-      if (created) await openGame(created);
+      if (editingGameId !== null) {
+        const gameId = editingGameId;
+        const input: CatalogGameUpdateInput = {
+          name: draft.name,
+          slug: draft.slug,
+          developer: draft.developer,
+          game_type: draft.game_type,
+          description: draft.description,
+          cover_url: draft.cover_url,
+          official_url: draft.official_url
+        };
+
+        await updateCatalogGame(gameId, input);
+        await refreshCatalog();
+        selectedGame = games.find((game) => game.id === gameId) ?? null;
+        showForm = false;
+        resetDraft();
+      } else {
+        const id = await createCatalogGame({ ...draft });
+        showForm = false;
+        resetDraft();
+        await refreshCatalog();
+        const created = games.find((game) => game.id === id);
+        if (created) await openGame(created);
+      }
     } catch (error) {
-      console.error('Error al crear la ficha del catálogo:', error);
+      console.error('Error al guardar la ficha del catálogo:', error);
       const message = error instanceof Error ? error.message : String(error);
       formError = message.includes('UNIQUE')
         ? 'Ya existe un juego con ese identificador. Prueba con otro.'
@@ -123,6 +149,27 @@
     } finally {
       saving = false;
     }
+  }
+
+  function openEditForm() {
+    if (!selectedGame) return;
+
+    const game = selectedGame;
+    const preferredVersion = versions.find((version) => version.is_default === 1) ?? versions[0];
+    draft = {
+      name: game.name,
+      slug: game.slug,
+      developer: game.developer,
+      game_type: game.game_type,
+      description: game.description,
+      cover_url: game.cover_url,
+      official_url: game.official_url,
+      version_label: preferredVersion?.version_label ?? '1.0',
+      platform: preferredVersion?.platform ?? 'unknown'
+    };
+    editingGameId = game.id;
+    formError = '';
+    showForm = true;
   }
 
   async function openGame(game: CatalogGame) {
@@ -219,6 +266,7 @@
         {#if isHttpUrl(selectedGame.official_url)}
           <a class="enc-external-link" href={selectedGame.official_url} target="_blank" rel="noreferrer">Web del proyecto ↗</a>
         {/if}
+        <button class="enc-secondary-button" type="button" onclick={openEditForm}>Editar ficha</button>
       </div>
     </header>
 
@@ -361,22 +409,31 @@
     <div class="enc-modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !saving) showForm = false; }}>
       <dialog open class="enc-modal" aria-modal="true" aria-labelledby="enc-form-title">
         <div class="enc-modal-heading">
-          <div><span class="enc-kicker">NUEVA ENTRADA</span><h2 id="enc-form-title">Añadir al catálogo</h2></div>
+          <div>
+            <span class="enc-kicker">{editingGameId === null ? 'NUEVA ENTRADA' : 'EDITAR FICHA'}</span>
+            <h2 id="enc-form-title">{editingGameId === null ? 'Añadir al catálogo' : 'Editar ficha del catálogo'}</h2>
+          </div>
           <button class="enc-close-button" type="button" aria-label="Cerrar" disabled={saving} onclick={() => showForm = false}>×</button>
         </div>
-        <p class="enc-modal-intro">Esta ficha pertenece a la enciclopedia. No instala el juego ni modifica tu biblioteca personal.</p>
+        <p class="enc-modal-intro">
+          {editingGameId === null
+            ? 'Esta ficha pertenece a la enciclopedia. No instala el juego ni modifica tu biblioteca personal.'
+            : 'Modifica los datos generales del juego. Sus versiones y el contenido asociado no cambiarán.'}
+        </p>
 
-        <form class="enc-form" onsubmit={handleCreate}>
+        <form class="enc-form" onsubmit={handleSave}>
           <label>Nombre del juego <input required maxlength="120" value={draft.name} oninput={(event) => updateName(event.currentTarget.value)} placeholder="Pokémon Rojo Fuego" /></label>
           <label>Identificador interno <input required maxlength="140" bind:value={draft.slug} placeholder="pokemon-rojo-fuego" /><small>Se genera automáticamente a partir del nombre; puedes modificarlo.</small></label>
           <div class="enc-form-row">
             <label>Desarrollador <input maxlength="120" bind:value={draft.developer} placeholder="Nintendo / Game Freak" /></label>
             <label>Tipo <select bind:value={draft.game_type}><option value="official">Oficial</option><option value="fangame">Fangame</option><option value="rom_hack">ROM hack</option><option value="other">Otro</option></select></label>
           </div>
+          {#if editingGameId === null}
           <div class="enc-form-row">
             <label>Primera versión <input required maxlength="80" bind:value={draft.version_label} placeholder="1.0" /></label>
             <label>Plataforma <select bind:value={draft.platform}><option value="unknown">Sin especificar</option><option value="windows">Windows</option><option value="gba">Game Boy Advance</option><option value="nds">Nintendo DS</option><option value="3ds">Nintendo 3DS</option><option value="switch">Nintendo Switch</option><option value="other">Otra</option></select></label>
           </div>
+          {/if}
           <label>
             Descripción
             <textarea
@@ -393,7 +450,9 @@
           {#if formError}<div class="enc-alert" role="alert">{formError}</div>{/if}
           <div class="enc-form-actions">
             <button class="enc-secondary-button" type="button" disabled={saving} onclick={() => showForm = false}>Cancelar</button>
-            <button class="enc-primary-button" type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Crear ficha'}</button>
+            <button class="enc-primary-button" type="submit" disabled={saving}>
+              {saving ? 'Guardando...' : editingGameId === null ? 'Crear ficha' : 'Guardar cambios'}
+            </button>
           </div>
         </form>
       </dialog>
