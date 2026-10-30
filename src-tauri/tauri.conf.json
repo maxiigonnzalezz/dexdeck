@@ -15,8 +15,8 @@
         "title": "DexDeck",
         "width": 800,
         "height": 600,
-        "transparent": true,
-        "backgroundColor": "#00000000"
+        "transparent": false,
+        "backgroundColor": "#0a0e11"
       }
     ],
     "security": {

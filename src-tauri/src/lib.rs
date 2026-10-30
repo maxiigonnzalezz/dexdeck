@@ -2,7 +2,6 @@
 mod executable_metadata;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 // DEXDECK MULTIPLATFORM SUPPORT v1
@@ -142,6 +141,209 @@ fn launch_platform_executable(
     spawn_native_executable(executable, working_directory)
 }
 
+
+// DEXDECK WALLPAPER-BACKED LIQUID GLASS v1
+// Uses the wallpaper source itself, never a screenshot of windows behind DexDeck.
+fn encode_wallpaper_data_url(mime: &str, bytes: &[u8]) -> String {
+    use base64::Engine as _;
+    format!(
+        "data:{};base64,{}",
+        mime,
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn detect_mpvpaper_source() -> Option<(std::path::PathBuf, f64)> {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let uptime: f64 = fs::read_to_string("/proc/uptime")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()?;
+    // Linux exposes the process start time in clock ticks since boot.
+    let ticks_per_second = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if ticks_per_second <= 0 {
+        return None;
+    }
+
+    for entry in fs::read_dir("/proc").ok()?.flatten() {
+        let pid = entry.file_name();
+        if !pid.to_string_lossy().bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+
+        let process_dir = entry.path();
+        let Ok(comm) = fs::read_to_string(process_dir.join("comm")) else {
+            continue;
+        };
+        if comm.trim() != "mpvpaper" {
+            continue;
+        }
+
+        let Ok(raw_args) = fs::read(process_dir.join("cmdline")) else {
+            continue;
+        };
+        let args: Vec<String> = raw_args
+            .split(|byte| *byte == 0)
+            .filter(|part| !part.is_empty())
+            .map(|part| String::from_utf8_lossy(part).into_owned())
+            .collect();
+
+        let process_cwd = fs::read_link(process_dir.join("cwd")).ok();
+        let wallpaper_path = args.iter().rev().find_map(|arg| {
+            let candidate = PathBuf::from(arg);
+            let resolved = if candidate.is_absolute() {
+                candidate
+            } else {
+                process_cwd.as_ref()?.join(candidate)
+            };
+            resolved.is_file().then_some(resolved)
+        });
+        let Some(wallpaper_path) = wallpaper_path else {
+            continue;
+        };
+
+        let Ok(stat) = fs::read_to_string(process_dir.join("stat")) else {
+            continue;
+        };
+        let Some((_, fields)) = stat.rsplit_once(')') else {
+            continue;
+        };
+        let fields: Vec<&str> = fields.split_whitespace().collect();
+        // After the command name, field 22 (starttime) is index 19.
+        let Some(start_ticks_text) = fields.get(19) else {
+            continue;
+        };
+        let Ok(start_ticks) = start_ticks_text.parse::<f64>() else {
+            continue;
+        };
+        let started_at = start_ticks / ticks_per_second as f64;
+        let elapsed = (uptime - started_at).max(0.0);
+        return Some((wallpaper_path, elapsed));
+    }
+
+    None
+}
+
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn get_wallpaper_snapshot() -> Result<Option<String>, String> {
+    use std::process::Command;
+
+    let Some((wallpaper_path, elapsed)) = detect_mpvpaper_source() else {
+        return Ok(None);
+    };
+
+    // ffprobe reads the source video duration; elapsed process time lets us
+    // estimate the frame currently shown by mpvpaper's looping wallpaper.
+    let probe = Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(&wallpaper_path)
+        .output();
+    let Ok(probe) = probe else {
+        return Ok(None);
+    };
+    if !probe.status.success() {
+        return Ok(None);
+    }
+    let duration: f64 = String::from_utf8_lossy(&probe.stdout).trim().parse().unwrap_or(0.0);
+    if !duration.is_finite() || duration <= 0.0 {
+        return Ok(None);
+    }
+
+    let position = elapsed % duration;
+    let frame = Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-threads", "1", "-ss"])
+        .arg(format!("{position:.3}"))
+        .arg("-i")
+        .arg(&wallpaper_path)
+        .args([
+            "-frames:v", "1",
+            "-vf", "scale='min(1920,iw)':-2",
+            "-q:v", "6",
+            "-f", "image2pipe",
+            "-vcodec", "mjpeg",
+            "pipe:1",
+        ])
+        .output();
+    let Ok(frame) = frame else {
+        return Ok(None);
+    };
+    if !frame.status.success() || frame.stdout.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(encode_wallpaper_data_url("image/jpeg", &frame.stdout)))
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn get_wallpaper_snapshot() -> Result<Option<String>, String> {
+    use std::fs;
+
+    let Some(app_data) = std::env::var_os("APPDATA") else {
+        return Ok(None);
+    };
+    let themes = std::path::PathBuf::from(app_data).join("Microsoft").join("Windows").join("Themes");
+    let transcoded = themes.join("TranscodedWallpaper");
+
+    // Windows keeps the current wallpaper in TranscodedWallpaper. CachedFiles
+    // is a fallback for installations where that file is unavailable.
+    let wallpaper_path = if transcoded.is_file() {
+        Some(transcoded)
+    } else {
+        let cached = themes.join("CachedFiles");
+        fs::read_dir(cached)
+            .ok()
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
+                if matches!(extension.as_str(), "jpg" | "jpeg" | "png" | "bmp") {
+                    let modified = entry.metadata().ok()?.modified().ok()?;
+                    Some((modified, path))
+                } else {
+                    None
+                }
+            })
+            .max_by_key(|(modified, _)| *modified)
+            .map(|(_, path)| path)
+    };
+    let Some(wallpaper_path) = wallpaper_path else {
+        return Ok(None);
+    };
+    let bytes = fs::read(&wallpaper_path).map_err(|error| {
+        format!("No se pudo leer el fondo de Windows: {error}")
+    })?;
+    let mime = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"BM") {
+        "image/bmp"
+    } else {
+        return Ok(None);
+    };
+
+    Ok(Some(encode_wallpaper_data_url(mime, &bytes)))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[tauri::command]
+fn get_wallpaper_snapshot() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SystemInfo {
@@ -254,20 +456,16 @@ pub fn run() {
             ",
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 10,
+            description: "remove_seeded_demo_games",
+            sql: include_str!("migrations/0010_remove_seeded_demo_games.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
-        .setup(|app| {
-            // DevTools solo durante el desarrollo.
-            #[cfg(debug_assertions)]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-            }
 
-            Ok(())
-        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
@@ -278,7 +476,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             launch_game,
             get_system_info,
-            executable_metadata::inspect_game_executable
+            executable_metadata::inspect_game_executable,
+            get_wallpaper_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

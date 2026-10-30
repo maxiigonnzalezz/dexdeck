@@ -28,7 +28,12 @@ tauri-plugin-dialog = "2"
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 
+base64 = "0.22"
+
 pelite = "0.10"
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [profile.release]
 codegen-units = 1
 lto = true

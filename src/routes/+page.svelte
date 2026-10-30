@@ -63,6 +63,9 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
   let theme = $state<ThemeName>('dark');
   let launchingGameId = $state<number | null>(null);
   let systemInfo = $state<SystemInfo | null>(null);
+  let wallpaperRefreshTimer: number | undefined;
+  let wallpaperRefreshInFlight = false;
+  let wallpaperSnapshotWarningShown = false;
 
   const navigation = [
     { label: 'Biblioteca', icon: '▦' },
@@ -80,6 +83,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
     applyTheme(theme, false);
     void loadGames();
     void loadSystemInfo();
+    return () => stopWallpaperRefresh();
   });
 
   function applyTheme(nextTheme: ThemeName, persist = true) {
@@ -93,7 +97,59 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
         console.warn('No se pudo guardar la preferencia de tema:', error);
       }
     }
+
+    if (nextTheme === 'glass') {
+      startWallpaperRefresh();
+    } else {
+      stopWallpaperRefresh();
+      document.documentElement.style.removeProperty('--dd-wallpaper-image');
+    }
   }
+
+
+  // Wallpaper-backed Liquid Glass. The native command returns an image made
+  // from the wallpaper source, not from the desktop/window compositor.
+
+  async function refreshWallpaperSnapshot() {
+    if (theme !== 'glass' || wallpaperRefreshInFlight) return;
+    wallpaperRefreshInFlight = true;
+    try {
+      const imageData = await invoke<string | null>('get_wallpaper_snapshot');
+      if (imageData) {
+        document.documentElement.style.setProperty(
+          '--dd-wallpaper-image',
+          `url("${imageData}")`
+        );
+      } else {
+        document.documentElement.style.removeProperty('--dd-wallpaper-image');
+      }
+    } catch (error) {
+      if (!wallpaperSnapshotWarningShown) {
+        console.warn('No se pudo obtener el fondo de escritorio para Liquid Glass:', error);
+        wallpaperSnapshotWarningShown = true;
+      }
+    } finally {
+      wallpaperRefreshInFlight = false;
+    }
+  }
+
+  function stopWallpaperRefresh() {
+    if (wallpaperRefreshTimer !== undefined) {
+      window.clearInterval(wallpaperRefreshTimer);
+      wallpaperRefreshTimer = undefined;
+    }
+  }
+
+  function startWallpaperRefresh() {
+    stopWallpaperRefresh();
+    void refreshWallpaperSnapshot();
+    // mpvpaper is a video wallpaper, so refresh the source frame periodically.
+    const refreshInterval = systemInfo?.os === 'linux' ? 1200 : 15000;
+    wallpaperRefreshTimer = window.setInterval(() => {
+      void refreshWallpaperSnapshot();
+    }, refreshInterval);
+  }
+
 
   function selectTheme(nextTheme: ThemeName) {
     applyTheme(nextTheme);
@@ -131,6 +187,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
   async function loadSystemInfo() {
     try {
       systemInfo = await invoke<SystemInfo>('get_system_info');
+      if (theme === 'glass') startWallpaperRefresh();
     } catch (error) {
       console.warn('No se pudo detectar el sistema operativo:', error);
       systemInfo = { os: 'unknown', osName: 'Desconocido', architecture: 'Desconocida' };
@@ -1013,7 +1070,7 @@ async function removeSelectedGame() {
                 </button>
               </div>
               {#if theme === 'glass'}
-                <p class="theme-hint">La transparencia real depende de Tauri y de que tu compositor permita el efecto.</p>
+                <p class="theme-hint">Usa el fondo de escritorio como textura; no muestra las ventanas que queden detrás.</p>
               {/if}
             </div>
           </div>
@@ -2207,25 +2264,37 @@ async function removeSelectedGame() {
 
   /* DEXDECK LIQUID GLASS REFINEMENT v2 — PEARL DROPLETS */
 
-/* The full window acts as a frosted, neutral veil over the desktop. */
+/*
+ * The window uses an opaque wallpaper texture underneath translucent UI panels.
+ * No backdrop-filter is applied to the whole window: that would sample other
+ * windows behind DexDeck. The image comes only from mpvpaper/Windows wallpaper.
+ */
 .app-shell[data-theme='glass'] {
   position: relative;
   isolation: isolate;
-  background: var(--dd-app-bg) !important;
-  backdrop-filter: blur(30px) saturate(142%);
-  -webkit-backdrop-filter: blur(30px) saturate(142%);
+  background: transparent !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
-/* A faint pearly light falloff, like light passing through thick glass. */
+/* A blurred, darkened wallpaper frame forms the glass substrate. */
 .app-shell[data-theme='glass']::before {
   content: "";
   position: fixed;
-  inset: 0;
+  inset: -22px;
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 12% 0%, rgba(255, 255, 255, 0.105), transparent 38%),
-    radial-gradient(ellipse at 88% 100%, rgba(218, 235, 229, 0.055), transparent 42%);
+    radial-gradient(ellipse at 12% 0%, rgba(255, 255, 255, 0.11), transparent 38%),
+    radial-gradient(ellipse at 88% 100%, rgba(218, 235, 229, 0.065), transparent 42%),
+    linear-gradient(rgba(12, 18, 19, 0.48), rgba(12, 18, 19, 0.48)),
+    var(--dd-wallpaper-image, linear-gradient(145deg, #34403e, #141b1c 58%, #27302e));
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(18px) saturate(125%);
+  transform: scale(1.035);
+  will-change: filter, transform;
 }
 
 /* Larger surfaces: smoky pearl glass, with a soft inner highlight. */
