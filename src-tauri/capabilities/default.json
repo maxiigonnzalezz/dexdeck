@@ -10,6 +10,17 @@
     "opener:default",
     "sql:default",
     "sql:allow-execute",
-    "dialog:default"
+    "dialog:default",
+    "updater:default",
+    "process:default",
+    "log:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/maxiigonnzalezz/dexdeck/releases/latest"
+        }
+      ]
+    }
   ]
 }

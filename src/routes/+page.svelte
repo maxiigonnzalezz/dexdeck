@@ -1,18 +1,23 @@
 <script lang="ts">
+  import Encyclopedia from '$lib/components/Encyclopedia.svelte';
   import {
+      hideGame,
+      importHiddenGames,
       insertGame,
       listGames,
       updateGame,
       type Game,
       type GameInput,
-      hideGame,
-      importHiddenGames,
   } from '$lib/db';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { getVersion } from '@tauri-apps/api/app';
   import { invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { open } from '@tauri-apps/plugin-dialog';
+  import { attachConsole, info } from '@tauri-apps/plugin-log';
+  import { openUrl } from '@tauri-apps/plugin-opener';
+  import { relaunch } from '@tauri-apps/plugin-process';
+  import { check, type Update } from '@tauri-apps/plugin-updater';
   import { onMount } from 'svelte';
-  import Encyclopedia from '$lib/components/Encyclopedia.svelte';
 
   let activeSection = $state('Biblioteca');
   let search = $state('');
@@ -63,9 +68,29 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
   let theme = $state<ThemeName>('dark');
   let launchingGameId = $state<number | null>(null);
   let systemInfo = $state<SystemInfo | null>(null);
+
+  type InstallationInfo = {
+    kind: 'windowsNsis' | 'appImage' | 'deb' | 'debNoPackageManager' | 'unsupported';
+    canUpdate: boolean;
+    canUninstall: boolean;
+    message: string;
+  };
+  type AppUpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'current' | 'manual' | 'error';
+  let appVersion = $state('0.1.0');
+  let installationInfo = $state<InstallationInfo | null>(null);
+  let appUpdateState = $state<AppUpdateState>('idle');
+  let appUpdateMessage = $state('');
+  let appUpdateVersion = $state('');
+  let appUpdateNotes = $state('');
+  let appUpdateProgress = $state(0);
+  let pendingAppUpdate: Update | null = null;
+  let uninstallDialog: HTMLDialogElement | undefined = $state(undefined);
+  let uninstallChoice = $state<'keep' | 'delete'>('keep');
+  let uninstalling = $state(false);
   let wallpaperRefreshTimer: number | undefined;
   let wallpaperRefreshInFlight = false;
   let wallpaperSnapshotWarningShown = false;
+  let detachLogConsole: (() => void) | undefined;
 
   const navigation = [
     { label: 'Biblioteca', icon: '▦' },
@@ -76,6 +101,14 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
   ];
 
   onMount(() => {
+    void attachConsole()
+      .then((detach) => {
+        detachLogConsole = detach;
+        void info('Interfaz de DexDeck iniciada');
+      })
+      .catch((error) => {
+        console.error('No se pudo conectar el sistema de logs:', error);
+      });
     const savedTheme = window.localStorage.getItem('dexdeck-theme');
     if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'glass') {
       theme = savedTheme;
@@ -83,7 +116,11 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
     applyTheme(theme, false);
     void loadGames();
     void loadSystemInfo();
-    return () => stopWallpaperRefresh();
+    void loadMaintenanceInfo();
+    return () => {
+      detachLogConsole?.();
+      stopWallpaperRefresh();
+    };
   });
 
   function applyTheme(nextTheme: ThemeName, persist = true) {
@@ -191,6 +228,144 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
     } catch (error) {
       console.warn('No se pudo detectar el sistema operativo:', error);
       systemInfo = { os: 'unknown', osName: 'Desconocido', architecture: 'Desconocida' };
+    }
+  }
+
+  async function loadMaintenanceInfo() {
+    try {
+      appVersion = await getVersion();
+    } catch (error) {
+      console.warn('No se pudo leer la versión de DexDeck:', error);
+    }
+
+    try {
+      installationInfo = await invoke<InstallationInfo>('get_installation_info');
+    } catch (error) {
+      console.warn('No se pudo detectar el tipo de instalación:', error);
+      installationInfo = {
+        kind: 'unsupported',
+        canUpdate: false,
+        canUninstall: false,
+        message: 'No se ha podido identificar cómo está instalada DexDeck.'
+      };
+    }
+  }
+
+  async function checkForAppUpdates() {
+    if (!installationInfo) return;
+
+    if (installationInfo.kind === 'deb') {
+      appUpdateState = 'manual';
+      appUpdateMessage = 'Los paquetes DEB se actualizan descargando la nueva versión e instalándola con el gestor de paquetes.';
+      try {
+        await openUrl("https://github.com/maxiigonnzalezz/dexdeck/releases/latest");
+      } catch (error) {
+        console.error('No se pudo abrir la página de descargas:', error);
+        appUpdateMessage = 'No se pudo abrir la página de descargas. Puedes acceder a ella desde GitHub Releases.';
+      }
+      return;
+    }
+
+    if (!installationInfo.canUpdate) {
+      appUpdateState = 'error';
+      appUpdateMessage = installationInfo.message || 'Esta instalación no admite actualizaciones automáticas.';
+      return;
+    }
+
+    appUpdateState = 'checking';
+    appUpdateMessage = 'Comprobando si hay una versión nueva…';
+    appUpdateProgress = 0;
+
+    try {
+      if (pendingAppUpdate) {
+        await pendingAppUpdate.close();
+        pendingAppUpdate = null;
+      }
+
+      const update = await check();
+      if (!update) {
+        appUpdateState = 'current';
+        appUpdateMessage = `Ya tienes la versión más reciente (${appVersion}).`;
+        appUpdateVersion = '';
+        appUpdateNotes = '';
+        return;
+      }
+
+      pendingAppUpdate = update;
+      appUpdateVersion = update.version;
+      appUpdateNotes = update.body ?? '';
+      appUpdateState = 'available';
+      appUpdateMessage = `Hay una actualización disponible: ${update.version}. Pulsa «Actualizar» para instalarla.`;
+    } catch (error) {
+      console.error('Error al comprobar actualizaciones:', error);
+      appUpdateState = 'error';
+      appUpdateMessage = 'No se han podido comprobar las actualizaciones. Comprueba tu conexión e inténtalo de nuevo.';
+    }
+  }
+
+  async function installAppUpdate() {
+    if (!pendingAppUpdate || appUpdateState !== 'available') return;
+
+    appUpdateState = 'downloading';
+    appUpdateMessage = `Descargando DexDeck ${appUpdateVersion}…`;
+    appUpdateProgress = 0;
+    let downloaded = 0;
+    let contentLength = 0;
+
+    try {
+      await pendingAppUpdate.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          contentLength = event.data.contentLength ?? 0;
+          downloaded = 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (contentLength > 0) {
+            appUpdateProgress = Math.min(100, Math.round((downloaded / contentLength) * 100));
+          }
+        } else if (event.event === 'Finished') {
+          appUpdateProgress = 100;
+          appUpdateState = 'installing';
+          appUpdateMessage = 'Descarga completada. Instalando la actualización…';
+        }
+      });
+
+      pendingAppUpdate = null;
+      appUpdateState = 'installing';
+      appUpdateMessage = 'Actualización instalada. Reiniciando DexDeck…';
+      await relaunch();
+    } catch (error) {
+      console.error('No se pudo instalar la actualización:', error);
+      appUpdateState = 'error';
+      appUpdateMessage = 'La actualización no se ha podido instalar. Tu instalación actual se ha conservado.';
+    }
+  }
+
+  function handleAppUpdateAction() {
+    if (appUpdateState === 'available') {
+      void installAppUpdate();
+    } else {
+      void checkForAppUpdates();
+    }
+  }
+
+  function openUninstallDialog() {
+    uninstallChoice = 'keep';
+    uninstallDialog?.showModal();
+  }
+
+  async function confirmUninstall() {
+    if (!installationInfo?.canUninstall || uninstalling) return;
+    uninstalling = true;
+
+    try {
+      await invoke('start_uninstall', { deleteData: uninstallChoice === 'delete' });
+    } catch (error) {
+      console.error('No se pudo iniciar la desinstalación:', error);
+      uninstalling = false;
+      notice = typeof error === 'string'
+        ? error
+        : 'No se ha podido iniciar la desinstalación. No se han eliminado tus datos.';
+      uninstallDialog?.close();
     }
   }
 
@@ -1011,15 +1186,58 @@ async function removeSelectedGame() {
         <section class="subpage-header">
           <div class="eyebrow"><span class="eyebrow-line"></span> SIEMPRE AL DÍA</div>
           <h1>Centro de <span>actualizaciones.</span></h1>
-          <p class="intro">Consulta la información de tus fangames y comprueba si hay nuevas versiones.</p>
+          <p class="intro">Mantén DexDeck actualizado y consulta aquí las futuras actualizaciones de tus fangames.</p>
         </section>
 
-        <div class="placeholder-panel">
-          <div class="placeholder-icon">↻</div>
-          <h2>Tus juegos, al día.</h2>
-          <p>La comprobación de versiones llegará en una siguiente fase. Primero configuraremos las fuentes oficiales de cada juego.</p>
-          <button class="secondary-button" onclick={() => navigate('Biblioteca')}>Volver a la biblioteca</button>
+        <div class="settings-panel app-update-panel">
+          <div class="setting-row app-update-row">
+            <div class="setting-icon">↻</div>
+            <div class="setting-copy app-update-copy">
+              <strong>Actualización de DexDeck</strong>
+              <p>Versión instalada: {appVersion}</p>
+              {#if installationInfo}
+                <p>{installationInfo.message}</p>
+              {/if}
+              {#if appUpdateMessage}
+                <p class="app-update-message" role="status">{appUpdateMessage}</p>
+              {/if}
+              {#if appUpdateNotes && appUpdateState === 'available'}
+                <p class="app-update-notes">{appUpdateNotes}</p>
+              {/if}
+              {#if appUpdateState === 'downloading'}
+                <div class="app-update-progress" aria-label="Progreso de descarga">
+                  <span style={`width: ${appUpdateProgress}%`}></span>
+                </div>
+                {#if appUpdateProgress > 0}
+                  <p>{appUpdateProgress}% descargado</p>
+                {/if}
+              {/if}
+            </div>
+            <button
+              type="button"
+              class="primary-button app-update-button"
+              disabled={!installationInfo || (!installationInfo.canUpdate && installationInfo.kind !== 'deb') || ['checking', 'downloading', 'installing'].includes(appUpdateState)}
+              onclick={handleAppUpdateAction}
+            >
+              {#if appUpdateState === 'checking'}Comprobando…{:else if appUpdateState === 'downloading'}Descargando…{:else if appUpdateState === 'installing'}Instalando…{:else if appUpdateState === 'available'}Actualizar ahora{:else}Actualizar{/if}
+            </button>
+          </div>
         </div>
+
+        <section class="library-section fangame-updates-section">
+          <div class="section-heading">
+            <div>
+              <div class="section-kicker">TU COLECCIÓN</div>
+              <h2>Actualizaciones de fangames</h2>
+            </div>
+          </div>
+          <div class="placeholder-panel">
+            <div class="placeholder-icon">◇</div>
+            <h2>Tus juegos, al día.</h2>
+            <p>La comprobación de versiones de fangames llegará más adelante. Primero configuraremos las fuentes oficiales de cada proyecto.</p>
+            <button class="secondary-button" onclick={() => navigate('Biblioteca')}>Volver a la biblioteca</button>
+          </div>
+        </section>
 
       {:else if activeSection === 'Ajustes'}
         <section class="subpage-header">
@@ -1089,6 +1307,22 @@ async function removeSelectedGame() {
               <p>{#if systemInfo?.os === 'windows'}Los ejecutables .exe se inician de forma nativa.{:else if systemInfo?.os === 'linux'}Wine es necesario para ejecutar juegos de Windows.{:else}La configuración de motores externos se añadirá más adelante.{/if}</p>
             </div>
             <span class="setting-value pending">{#if systemInfo?.os === 'windows'}Nativo{:else if systemInfo?.os === 'linux'}Wine externo{:else}Pendiente{/if}</span>
+          </div>
+          <div class="setting-row setting-row-danger">
+            <div class="setting-icon">⌫</div>
+            <div class="setting-copy">
+              <strong>Desinstalar DexDeck</strong>
+              <p>Quita la aplicación de este equipo y elige qué hacer con sus datos locales.</p>
+              {#if installationInfo && !installationInfo.canUninstall}
+                <p class="app-update-message">{installationInfo.message}</p>
+              {/if}
+            </div>
+            <button
+              type="button"
+              class="danger-button"
+              disabled={!installationInfo?.canUninstall || uninstalling}
+              onclick={openUninstallDialog}
+            >Desinstalar</button>
           </div>
         </div>
       {/if}
@@ -1378,6 +1612,50 @@ async function removeSelectedGame() {
     {/if}
   </dialog>
 {/if}
+
+
+<dialog
+  bind:this={uninstallDialog}
+  class="modal uninstall-modal"
+  aria-labelledby="uninstall-title"
+  onclick={(event) => {
+    if (event.target === uninstallDialog && !uninstalling) uninstallDialog?.close();
+  }}
+>
+  <div class="modal-top">
+    <div class="modal-icon remove-icon">!</div>
+    <button class="modal-close" aria-label="Cerrar" disabled={uninstalling} onclick={() => uninstallDialog?.close()}>×</button>
+  </div>
+  <div class="section-kicker">GESTIÓN DE LA APLICACIÓN</div>
+  <h2 id="uninstall-title">Desinstalar DexDeck.</h2>
+  <p class="modal-description">Elige qué hacer con los datos locales antes de quitar el programa. Los archivos de tus fangames en otras carpetas nunca se borrarán.</p>
+
+  <label class="uninstall-option">
+    <input type="radio" name="uninstall-choice" value="keep" bind:group={uninstallChoice} disabled={uninstalling} />
+    <span>
+      <strong>Conservar mis datos</strong>
+      <small>Quita DexDeck, pero conserva la biblioteca, la base de datos, las preferencias y la configuración local.</small>
+    </span>
+  </label>
+  <label class="uninstall-option uninstall-option-danger">
+    <input type="radio" name="uninstall-choice" value="delete" bind:group={uninstallChoice} disabled={uninstalling} />
+    <span>
+      <strong>Eliminar todos mis datos</strong>
+      <small>Quita DexDeck y elimina también su base de datos, preferencias, almacenamiento local y caché. Es irreversible.</small>
+    </span>
+  </label>
+
+  {#if uninstallChoice === 'delete'}
+    <p class="uninstall-warning" role="alert">Se borrarán los datos propios de DexDeck de este usuario. Esta acción no se puede deshacer.</p>
+  {/if}
+
+  <div class="modal-actions">
+    <button type="button" class="secondary-button" disabled={uninstalling} onclick={() => uninstallDialog?.close()}>Cancelar</button>
+    <button type="button" class="danger-button" disabled={uninstalling} onclick={() => void confirmUninstall()}>
+      {uninstalling ? 'Preparando…' : uninstallChoice === 'delete' ? 'Eliminar datos y desinstalar' : 'Conservar datos y desinstalar'}
+    </button>
+  </div>
+</dialog>
 
 
 <style>
@@ -2026,7 +2304,6 @@ async function removeSelectedGame() {
   .page-content > .subpage-header,
   .page-content > .stats-row,
   .page-content > .library-section,
-  .page-content > .placeholder-panel,
   .page-content > .settings-panel,
   .page-content > .tip-banner,
   .page-content > .notice {
@@ -2036,7 +2313,6 @@ async function removeSelectedGame() {
   .page-content > .subpage-header { animation-delay: 25ms; }
   .page-content > .stats-row { animation-delay: 75ms; }
   .page-content > .library-section { animation-delay: 115ms; }
-  .page-content > .placeholder-panel,
   .page-content > .settings-panel { animation-delay: 90ms; }
   .page-content > .tip-banner { animation-delay: 170ms; }
   .page-content > .notice { animation-delay: 40ms; }
@@ -2505,6 +2781,35 @@ async function removeSelectedGame() {
     -webkit-backdrop-filter: none;
   }
 }
+
+
+  .app-update-panel { margin-top: 18px; }
+  .app-update-row { align-items: center; }
+  .app-update-copy { min-width: 0; }
+  .app-update-message { color: var(--dd-text) !important; }
+  .app-update-notes { margin-top: 7px !important; white-space: pre-line; }
+  .app-update-button { flex-shrink: 0; min-width: 125px; }
+  .app-update-progress { width: min(100%, 420px); height: 6px; margin-top: 10px; overflow: hidden; border-radius: 999px; background: var(--dd-soft); }
+  .app-update-progress span { display: block; height: 100%; border-radius: inherit; background: var(--dd-accent); transition: width 160ms ease; }
+  .fangame-updates-section { margin-top: 30px; }
+  .fangame-updates-section .placeholder-panel { margin-top: 16px; }
+  .setting-row-danger .setting-icon { color: #fb7185; background: rgba(244, 63, 94, 0.10); }
+  .uninstall-modal { width: min(100% - 32px, 520px); }
+  .uninstall-option { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px; padding: 14px; border: 1px solid var(--dd-border); border-radius: 11px; background: var(--dd-soft); cursor: pointer; }
+  .uninstall-option input { flex: 0 0 auto; margin: 3px 0 0; accent-color: var(--dd-accent); }
+  .uninstall-option strong { display: block; color: var(--dd-text); font-size: 12px; }
+  .uninstall-option small { display: block; margin-top: 5px; color: var(--dd-muted); font-size: 10px; line-height: 1.6; }
+  .uninstall-option-danger { border-color: rgba(244, 63, 94, 0.28); }
+  .uninstall-option-danger strong { color: #fb7185; }
+  .uninstall-warning { margin: 13px 0 0; padding: 10px 12px; border: 1px solid rgba(244, 63, 94, 0.28); border-radius: 8px; color: #fb7185; background: rgba(244, 63, 94, 0.08); font-size: 10px; line-height: 1.6; }
+  .uninstall-modal .modal-actions { flex-wrap: wrap; }
+  .uninstall-modal .modal-actions .danger-button { min-height: 37px; }
+
+  @media (max-width: 700px) {
+    .app-update-row { align-items: flex-start; flex-wrap: wrap; }
+    .app-update-button { margin-left: 49px; }
+    .uninstall-modal .modal-actions .danger-button { flex: 1 1 100%; }
+  }
 
 
 

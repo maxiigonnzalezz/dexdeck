@@ -72,6 +72,9 @@ jobs:
 
       - name: Build Linux bundles
         run: pnpm tauri build --bundles appimage,deb --verbose
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Prepare stable release filenames
         shell: bash
@@ -88,7 +91,12 @@ jobs:
             echo 'No se ha encontrado el paquete DEB generado.'
             exit 1
           fi
+          if [[ ! -f "${APPIMAGE}.sig" ]]; then
+            echo "No se ha encontrado la firma del AppImage (${APPIMAGE}.sig)."
+            exit 1
+          fi
           cp "$APPIMAGE" release-assets/linux/DexDeck-Linux-x64.AppImage
+          cp "${APPIMAGE}.sig" release-assets/linux/DexDeck-Linux-x64.AppImage.sig
           cp "$DEB" release-assets/linux/DexDeck-Linux-x64.deb
           ls -lah release-assets
 
@@ -142,6 +150,9 @@ jobs:
 
       - name: Build Windows NSIS installer
         run: pnpm tauri build --bundles nsis --verbose
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
       - name: Prepare stable release filename
         shell: pwsh
@@ -153,6 +164,9 @@ jobs:
           }
           New-Item -ItemType Directory -Force -Path 'release-assets/windows' | Out-Null
           Copy-Item $installers[0].FullName 'release-assets/windows/DexDeck-Windows-x64-Setup.exe'
+          $signature = "$($installers[0].FullName).sig"
+          if (!(Test-Path -LiteralPath $signature)) { throw "Updater signature not found: $signature" }
+          Copy-Item $signature 'release-assets/windows/DexDeck-Windows-x64-Setup.exe.sig'
           Get-ChildItem release-assets | Format-Table Name, Length
 
       - name: Upload Windows release file
@@ -184,10 +198,26 @@ jobs:
           name: DexDeck-Windows-x64
           path: release-assets/windows
 
-      - name: Create checksums
+      - name: Create checksums and updater manifest
         run: |
+          set -euo pipefail
           cd release-assets
           sha256sum linux/DexDeck-Linux-x64.AppImage linux/DexDeck-Linux-x64.deb windows/DexDeck-Windows-x64-Setup.exe > SHA256SUMS.txt
+          VERSION="${GITHUB_REF_NAME#v}"
+          WINDOWS_SIGNATURE="$(cat windows/DexDeck-Windows-x64-Setup.exe.sig)"
+          LINUX_SIGNATURE="$(cat linux/DexDeck-Linux-x64.AppImage.sig)"
+          WINDOWS_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/DexDeck-Windows-x64-Setup.exe"
+          LINUX_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/DexDeck-Linux-x64.AppImage"
+          PUB_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --arg windows_url "$WINDOWS_URL" \
+            --arg windows_signature "$WINDOWS_SIGNATURE" \
+            --arg linux_url "$LINUX_URL" \
+            --arg linux_signature "$LINUX_SIGNATURE" \
+            '{version:$version, pub_date:$pub_date, notes:"Consulta las notas de esta versión en GitHub Releases.", platforms:{"windows-x86_64":{url:$windows_url, signature:$windows_signature}, "linux-x86_64":{url:$linux_url, signature:$linux_signature}}}' \
+            > latest.json
 
       - name: Publish release and attach installers
         uses: softprops/action-gh-release@v2
@@ -202,4 +232,7 @@ jobs:
             release-assets/linux/DexDeck-Linux-x64.AppImage
             release-assets/linux/DexDeck-Linux-x64.deb
             release-assets/windows/DexDeck-Windows-x64-Setup.exe
+            release-assets/linux/DexDeck-Linux-x64.AppImage.sig
+            release-assets/windows/DexDeck-Windows-x64-Setup.exe.sig
+            release-assets/latest.json
             release-assets/SHA256SUMS.txt

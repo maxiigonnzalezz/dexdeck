@@ -1,8 +1,11 @@
 
 mod executable_metadata;
+mod maintenance;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri_plugin_sql::{Migration, MigrationKind};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind};
+use tauri::Manager;
 
 // DEXDECK MULTIPLATFORM SUPPORT v1
 #[tauri::command]
@@ -465,6 +468,31 @@ pub fn run() {
     ];
 
     tauri::Builder::default()
+        // Debe ser el primer plugin: detecta una segunda instancia antes del resto.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        // Restaura automáticamente tamaño y posición de las ventanas.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Logs a stdout, al directorio de logs de Tauri y al WebView.
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .level(log::LevelFilter::Info)
+                .max_file_size(5 * 1024 * 1024)
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::LogDir {
+                        file_name: Some("dexdeck".into()),
+                    }),
+                    Target::new(TargetKind::Webview),
+                ])
+                .build(),
+        )
 
         .plugin(tauri_plugin_dialog::init())
         .plugin(
@@ -473,11 +501,15 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             launch_game,
             get_system_info,
             executable_metadata::inspect_game_executable,
-            get_wallpaper_snapshot
+            get_wallpaper_snapshot,
+            maintenance::get_installation_info,
+            maintenance::start_uninstall
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

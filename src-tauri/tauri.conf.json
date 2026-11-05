@@ -32,6 +32,23 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "createUpdaterArtifacts": true,
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDM5RUQxNEQyMzdCQjZGNEEKUldSS2I3czMwaFR0T2FwcEJTWmJ3S0hSb0tvejFab09qbDRwSWxWSG13dDQ3N0E3U1ViNlM3MUoK",
+      "endpoints": [
+        "https://github.com/maxiigonnzalezz/dexdeck/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
