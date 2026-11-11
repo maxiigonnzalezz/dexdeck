@@ -73,8 +73,10 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 | Detección de metadatos | ✅ Implementada | Carpetas y metadatos PE de ejecutables Windows |
 | Temas claro y oscuro | ✅ Implementados | Preferencia persistente |
 | Liquid Glass | 🧪 En evolución | Diseño v2 perlado preparado; validar instalación y compilación final |
-| Enciclopedia: catálogo | 🧱 Primera versión | Listado, filtros, búsqueda y creación de fichas |
-| Versiones de juegos | 🧱 Primera versión | Alta inicial y selector de versiones |
+| Enciclopedia: catálogo | ✅ Funcional | Listado, filtros, búsqueda, alta, edición y borrado con confirmación |
+| Versiones de juegos | ✅ Funcional | Varias versiones por ficha, edición, borrado y versión predeterminada |
+| Fuentes y atribución | ✅ Implementadas | Registro de fuentes y atribución por ficha y versión |
+| Vínculos con la biblioteca | ✅ Implementados | Vincular, desvincular y mover entradas de la biblioteca |
 | Pokédex por versión | 🗺️ Estructura preparada | Tablas y pantalla inicial; falta gestionar e importar datos |
 | Regiones y ubicaciones | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Encuentros y objetos | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
@@ -206,7 +208,7 @@ La estructura puede evolucionar a medida que se separen componentes y servicios.
 
 ## 🗄️ Modelo de datos de la Enciclopedia
 
-La migración 8 introduce una base de datos aditiva para el catálogo y el contenido específico de cada versión. Está diseñada para no modificar ni eliminar las entradas de la tabla `games` existente.
+La migración 8 introduce una base de datos aditiva para el catálogo y el contenido específico de cada versión. Está diseñada para no modificar ni eliminar las entradas de la tabla `games` existente. La migración 11 añade las garantías de integridad de las versiones: una sola predeterminada por ficha, al menos una versión y promoción automática al borrar la predeterminada.
 
 | Tabla | Propósito |
 |---|---|
@@ -239,7 +241,7 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 
 - [ ] Validar la instalación de Liquid Glass v2 en el proyecto real.
 - [ ] Ejecutar `pnpm check` después de los cambios visuales.
-- [ ] Revisar las migraciones desde una base existente y desde una instalación limpia.
+- [x] Revisar las migraciones desde una base existente y desde una instalación limpia.
 - [ ] Añadir pruebas automatizadas para consultas y operaciones críticas.
 - [ ] Revisar los diálogos, navegación por teclado y accesibilidad.
 - [ ] Empezar a extraer componentes de `+page.svelte` sin alterar su comportamiento.
@@ -248,13 +250,13 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 
 ### Fase 2 — Catálogo completo y versiones
 
-- [ ] Editar fichas del catálogo.
-- [ ] Eliminar fichas con confirmación y reglas claras de integridad.
-- [ ] Añadir, editar y seleccionar varias versiones.
-- [ ] Guardar fechas, notas y plataformas por versión.
-- [ ] Gestionar fuentes y atribución de información.
-- [ ] Relacionar entradas del catálogo con juegos de la biblioteca.
-- [ ] Permitir deshacer o corregir relaciones equivocadas.
+- [x] Editar fichas del catálogo.
+- [x] Eliminar fichas con confirmación y reglas claras de integridad.
+- [x] Añadir, editar y seleccionar varias versiones.
+- [x] Guardar fechas, notas y plataformas por versión.
+- [x] Gestionar fuentes y atribución de información.
+- [x] Relacionar entradas del catálogo con juegos de la biblioteca.
+- [x] Permitir deshacer o corregir relaciones equivocadas.
 
 **Criterio de finalización:** el catálogo puede gestionarse sin tocar la biblioteca personal y cada juego admite varias versiones independientes.
 
@@ -437,6 +439,16 @@ Estas ideas no forman parte del alcance implementado; son posibilidades que enca
 ## 🗓️ Registro de progreso
 
 Este apartado se actualizará conforme se implementen y verifiquen nuevas funciones. Se registrarán por separado los cambios terminados, los que están en curso y las validaciones pendientes.
+
+### 11 de noviembre de 2026 — Fase 2 del catálogo
+
+- ✅ Edición de fichas del catálogo sin tocar las versiones ni la biblioteca.
+- ✅ Borrado de fichas con confirmación, recuento de versiones y vínculos, y conservación de `games`.
+- ✅ Gestión de versiones: alta, edición, borrado y versión predeterminada única por ficha.
+- ✅ Migración 11 con índice de unicidad, protección de la última versión y promoción automática de la predeterminada.
+- ✅ Registro de fuentes de datos y atribución visible en fichas y versiones; `source_id` nulo equivale a entrada manual.
+- ✅ Vinculación y desvinculación de entradas de la biblioteca, con versión opcional y confirmación al mover un vínculo existente.
+- 🧪 Migraciones comprobadas desde una base limpia y desde una base existente; `pnpm check`, `pnpm build` y `cargo test` (8 pruebas) correctos.
 
 ### 30 de octubre de 2026 — Base de DexDeck y Enciclopedia
 
