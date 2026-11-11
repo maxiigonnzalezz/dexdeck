@@ -2,6 +2,7 @@
   import {
       createCatalogGame,
       createCatalogGameVersion,
+      createDataSource,
       deleteCatalogGame,
       deleteCatalogGameVersion,
       getCatalogGameDeletionInfo,
@@ -10,6 +11,7 @@
       listCatalogGameLinks,
       listCatalogGameVersions,
       listCatalogGames,
+      listDataSources,
       listLinkableLibraryGames,
       unlinkLibraryGameFromCatalog,
       updateCatalogGame,
@@ -21,6 +23,8 @@
       type CatalogGameType,
       type CatalogGameVersion,
       type CatalogGameVersionInput,
+      type DataSource,
+      type DataSourceInput,
       type LinkableLibraryGame,
       type VersionSummary
   } from '$lib/encyclopedia';
@@ -58,7 +62,8 @@
     platform: 'unknown',
     release_date: '',
     notes: '',
-    is_default: false
+    is_default: false,
+    source_id: null
   });
   let links = $state<CatalogGameLink[]>([]);
   let linkableGames = $state<LinkableLibraryGame[]>([]);
@@ -68,6 +73,21 @@
   let linkError = $state('');
   let linkSaving = $state(false);
   let unlinkingGameId = $state<number | null>(null);
+  let sources = $state<DataSource[]>([]);
+  let showSourceManager = $state(false);
+  let sourceDialogContext = $state<'toolbar' | 'game' | 'version'>('toolbar');
+  let sourceError = $state('');
+  let sourceSaving = $state(false);
+  let sourceFormOpen = $state(false);
+  let sourceDraft = $state<DataSourceInput>({
+    source_key: '',
+    name: '',
+    source_type: 'community',
+    homepage_url: '',
+    license_name: '',
+    attribution_text: '',
+    terms_url: ''
+  });
 
   let draft = $state({
     name: '',
@@ -78,7 +98,8 @@
     cover_url: '',
     official_url: '',
     version_label: '1.0',
-    platform: 'unknown'
+    platform: 'unknown',
+    source_id: null as number | null
   });
 
   let filteredGames = $derived(
@@ -118,6 +139,7 @@
     pageError = '';
     try {
       games = await listCatalogGames();
+      sources = await listDataSources();
     } catch (error) {
       console.error('Error al cargar la enciclopedia:', error);
       pageError = 'No se ha podido cargar el catálogo local. Comprueba la base de datos.';
@@ -152,7 +174,8 @@
       cover_url: '',
       official_url: '',
       version_label: '1.0',
-      platform: 'unknown'
+      platform: 'unknown',
+      source_id: null
     };
     formError = '';
   }
@@ -180,7 +203,8 @@
           game_type: draft.game_type,
           description: draft.description,
           cover_url: draft.cover_url,
-          official_url: draft.official_url
+          official_url: draft.official_url,
+          source_id: draft.source_id
         };
 
         await updateCatalogGame(gameId, input);
@@ -221,7 +245,8 @@
       cover_url: game.cover_url,
       official_url: game.official_url,
       version_label: preferredVersion?.version_label ?? '1.0',
-      platform: preferredVersion?.platform ?? 'unknown'
+      platform: preferredVersion?.platform ?? 'unknown',
+      source_id: game.source_id
     };
     editingGameId = game.id;
     formError = '';
@@ -329,7 +354,8 @@
       platform: 'unknown',
       release_date: '',
       notes: '',
-      is_default: false
+      is_default: false,
+      source_id: null
     };
   }
 
@@ -352,7 +378,8 @@
       platform: version.platform,
       release_date: version.release_date,
       notes: version.notes,
-      is_default: version.is_default === 1
+      is_default: version.is_default === 1,
+      source_id: version.source_id
     };
   }
 
@@ -415,7 +442,8 @@
         platform: version.platform,
         release_date: version.release_date,
         notes: version.notes,
-        is_default: true
+        is_default: true,
+        source_id: version.source_id
       });
       await refreshCatalog();
       refreshSelectedGame();
@@ -521,6 +549,75 @@
     }
   }
 
+  function resetSourceDraft() {
+    sourceError = '';
+    sourceDraft = {
+      source_key: '',
+      name: '',
+      source_type: 'community',
+      homepage_url: '',
+      license_name: '',
+      attribution_text: '',
+      terms_url: ''
+    };
+  }
+
+  function openSourceManager(context: 'toolbar' | 'game' | 'version') {
+    sourceDialogContext = context;
+    sourceFormOpen = false;
+    resetSourceDraft();
+    showSourceManager = true;
+  }
+
+  function sourceTypeLabel(type: string): string {
+    switch (type) {
+      case 'official': return 'Oficial';
+      case 'community': return 'Comunidad';
+      case 'api': return 'API';
+      case 'manual': return 'Manual';
+      default: return 'Otra';
+    }
+  }
+
+  function toggleSourceForm() {
+    sourceFormOpen = !sourceFormOpen;
+    if (sourceFormOpen) resetSourceDraft();
+    else sourceError = '';
+  }
+
+  async function saveSource(event: SubmitEvent) {
+    event.preventDefault();
+    sourceError = '';
+
+    if (!sourceDraft.name.trim()) {
+      sourceError = 'La fuente necesita un nombre.';
+      return;
+    }
+
+    sourceSaving = true;
+    try {
+      const sourceId = await createDataSource(sourceDraft);
+      sources = await listDataSources();
+
+      if (sourceDialogContext === 'game') {
+        draft.source_id = sourceId;
+      } else if (sourceDialogContext === 'version') {
+        versionDraft.source_id = sourceId;
+      }
+
+      showSourceManager = false;
+      sourceFormOpen = false;
+    } catch (error) {
+      console.error('Error al guardar la fuente de datos:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      sourceError = message.includes('UNIQUE')
+        ? 'Ya existe una fuente con esa clave interna.'
+        : message;
+    } finally {
+      sourceSaving = false;
+    }
+  }
+
   function categoryLabel(type: CatalogGameType): string {
     switch (type) {
       case 'official': return 'Juego oficial';
@@ -577,6 +674,20 @@
         {:else}
           <p class="enc-description enc-muted">Todavía no hay una descripción para este juego.</p>
         {/if}
+        <p class="enc-attribution">
+          {#if selectedGame.source_name}
+            Fuente:
+            {#if isHttpUrl(selectedGame.source_homepage ?? '')}
+              <a class="enc-attribution-link" href={selectedGame.source_homepage ?? ''} target="_blank" rel="noreferrer">{selectedGame.source_name} ↗</a>
+            {:else}
+              <span>{selectedGame.source_name}</span>
+            {/if}
+            {#if selectedGame.source_attribution}<span> · {selectedGame.source_attribution}</span>{/if}
+            {#if selectedGame.source_license}<span> · Licencia: {selectedGame.source_license}</span>{/if}
+          {:else}
+            Entrada manual, sin fuente externa.
+          {/if}
+        </p>
         {#if isHttpUrl(selectedGame.official_url)}
           <a class="enc-external-link" href={selectedGame.official_url} target="_blank" rel="noreferrer">Web del proyecto ↗</a>
         {/if}
@@ -638,6 +749,15 @@
         {#if selectedVersion.release_date}<span>Lanzamiento: {selectedVersion.release_date}</span>{/if}
         {#if selectedVersion.is_default === 1}<span class="enc-default-badge">Predeterminada</span>{/if}
         {#if selectedVersion.notes}<span>{selectedVersion.notes}</span>{/if}
+        {#if selectedVersion.source_name}
+          <span>
+            Fuente: {selectedVersion.source_name}
+            {#if selectedVersion.source_attribution} · {selectedVersion.source_attribution}{/if}
+            {#if selectedVersion.source_license} · Licencia: {selectedVersion.source_license}{/if}
+          </span>
+        {:else}
+          <span>Entrada manual</span>
+        {/if}
       </div>
     {/if}
 
@@ -711,6 +831,9 @@
         <span aria-hidden="true">⌕</span>
         <input bind:value={search} type="search" placeholder="Buscar juegos, desarrolladores..." aria-label="Buscar en la enciclopedia" />
       </div>
+      <button class="enc-secondary-button" type="button" onclick={() => openSourceManager('toolbar')}>
+        Fuentes
+      </button>
       <button class="enc-primary-button" type="button" onclick={() => { resetDraft(); showForm = true; }}>
         <span aria-hidden="true">＋</span> Añadir juego
       </button>
@@ -809,6 +932,19 @@
             <label>URL de portada <input type="url" maxlength="1000" bind:value={draft.cover_url} placeholder="https://..." /></label>
             <label>Web oficial <input type="url" maxlength="1000" bind:value={draft.official_url} placeholder="https://..." /></label>
           </div>
+          <label>
+            Fuente de los datos
+            <div class="enc-input-with-action">
+              <select bind:value={draft.source_id}>
+                <option value={null}>Entrada manual (sin fuente externa)</option>
+                {#each sources as source (source.id)}
+                  <option value={source.id}>{source.name}</option>
+                {/each}
+              </select>
+              <button class="enc-secondary-button enc-compact-button" type="button" disabled={saving} onclick={() => openSourceManager('game')}>Gestionar</button>
+            </div>
+            <small>Si no eliges una fuente, la ficha se registra como entrada manual.</small>
+          </label>
           {#if formError}<div class="enc-alert" role="alert">{formError}</div>{/if}
           <div class="enc-form-actions">
             <button class="enc-secondary-button" type="button" disabled={saving} onclick={() => showForm = false}>Cancelar</button>
@@ -999,6 +1135,18 @@
             <label class="enc-checkbox-label"><input type="checkbox" bind:checked={versionDraft.is_default} disabled={versionFormMode === 'edit' && versions.length <= 1} /> Versión predeterminada</label>
           </div>
           <label>Notas <textarea rows="2" maxlength="1200" bind:value={versionDraft.notes} placeholder="Cambios, edición o detalles de esta versión..."></textarea></label>
+          <label>
+            Fuente de esta versión
+            <div class="enc-input-with-action">
+              <select bind:value={versionDraft.source_id}>
+                <option value={null}>Entrada manual (sin fuente externa)</option>
+                {#each sources as source (source.id)}
+                  <option value={source.id}>{source.name}</option>
+                {/each}
+              </select>
+              <button class="enc-secondary-button enc-compact-button" type="button" disabled={versionSaving} onclick={() => openSourceManager('version')}>Gestionar</button>
+            </div>
+          </label>
           <div class="enc-form-actions">
             {#if versionFormMode === 'edit'}
               <button class="enc-secondary-button" type="button" disabled={versionSaving} onclick={resetVersionDraft}>Cancelar edición</button>
@@ -1008,6 +1156,97 @@
             </button>
           </div>
         </form>
+      </dialog>
+    </div>
+  {/if}
+
+  {#if showSourceManager}
+    <div
+      class="enc-modal-backdrop enc-modal-backdrop-top"
+      role="presentation"
+      onclick={(event) => { if (event.target === event.currentTarget && !sourceSaving) showSourceManager = false; }}
+    >
+      <dialog open class="enc-modal enc-source-modal" aria-modal="true" aria-labelledby="enc-sources-title">
+        <div class="enc-modal-heading">
+          <div>
+            <span class="enc-kicker">FUENTES DE DATOS</span>
+            <h2 id="enc-sources-title">Atribución del contenido</h2>
+          </div>
+          <button class="enc-close-button" type="button" aria-label="Cerrar" disabled={sourceSaving} onclick={() => showSourceManager = false}>×</button>
+        </div>
+        <p class="enc-modal-intro">
+          Registra de dónde procede cada ficha o versión. Sin fuente asignada, el contenido se considera una entrada manual.
+        </p>
+
+        {#if sourceError && !sourceFormOpen}<div class="enc-alert" role="alert">{sourceError}</div>{/if}
+
+        {#if sources.length > 0}
+          <ul class="enc-source-list">
+            {#each sources as source (source.id)}
+              <li class="enc-source-item">
+                <div class="enc-source-item-title">
+                  <strong>{source.name}</strong>
+                  <span class="enc-default-badge">{sourceTypeLabel(source.source_type)}</span>
+                </div>
+                {#if source.attribution_text}<p>{source.attribution_text}</p>{/if}
+                <div class="enc-source-item-meta">
+                  {#if isHttpUrl(source.homepage_url)}
+                    <a class="enc-attribution-link" href={source.homepage_url} target="_blank" rel="noreferrer">Web de la fuente ↗</a>
+                  {/if}
+                  {#if source.license_name}<span>Licencia: {source.license_name}</span>{/if}
+                  {#if source.terms_url && isHttpUrl(source.terms_url)}
+                    <a class="enc-attribution-link" href={source.terms_url} target="_blank" rel="noreferrer">Términos ↗</a>
+                  {/if}
+                </div>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="enc-muted">Todavía no hay fuentes registradas.</p>
+        {/if}
+
+        {#if sourceFormOpen}
+          <form class="enc-form enc-source-form" onsubmit={saveSource}>
+            <div class="enc-form-section-title">Nueva fuente</div>
+            <div class="enc-form-row">
+              <label>Nombre <input required maxlength="120" bind:value={sourceDraft.name} placeholder="PokéAPI" /></label>
+              <label>
+                Tipo
+                <select bind:value={sourceDraft.source_type}>
+                  <option value="official">Oficial</option>
+                  <option value="community">Comunidad</option>
+                  <option value="api">API</option>
+                  <option value="manual">Manual</option>
+                  <option value="other">Otra</option>
+                </select>
+              </label>
+            </div>
+            <div class="enc-form-row">
+              <label>Clave interna <input maxlength="80" bind:value={sourceDraft.source_key} placeholder="se genera del nombre" /></label>
+              <label>Web <input type="url" maxlength="1000" bind:value={sourceDraft.homepage_url} placeholder="https://..." /></label>
+            </div>
+            <div class="enc-form-row">
+              <label>Licencia <input maxlength="160" bind:value={sourceDraft.license_name} placeholder="CC BY-SA 4.0" /></label>
+              <label>Términos de uso <input type="url" maxlength="1000" bind:value={sourceDraft.terms_url} placeholder="https://..." /></label>
+            </div>
+            <label>
+              Texto de atribución
+              <textarea rows="2" maxlength="600" bind:value={sourceDraft.attribution_text} placeholder="Cómo debe acreditarse esta fuente."></textarea>
+            </label>
+            {#if sourceError}<div class="enc-alert" role="alert">{sourceError}</div>{/if}
+            <div class="enc-form-actions">
+              <button class="enc-secondary-button" type="button" disabled={sourceSaving} onclick={toggleSourceForm}>Cancelar</button>
+              <button class="enc-primary-button" type="submit" disabled={sourceSaving}>
+                {sourceSaving ? 'Guardando...' : 'Guardar fuente'}
+              </button>
+            </div>
+          </form>
+        {:else}
+          <div class="enc-form-actions">
+            <button class="enc-secondary-button" type="button" onclick={toggleSourceForm}>Añadir fuente</button>
+            <button class="enc-primary-button" type="button" onclick={() => showSourceManager = false}>Listo</button>
+          </div>
+        {/if}
       </dialog>
     </div>
   {/if}
@@ -1089,6 +1328,21 @@
   .enc-library-list li:first-child { padding-top: 0; border-top: 0; }
   .enc-library-list small { margin-left: 6px; color: var(--enc-muted); font-size: 0.76rem; }
   .enc-library-empty { margin: 8px 0 0; color: var(--enc-muted); font-size: 0.8rem; line-height: 1.5; }
+  .enc-attribution { margin: 10px 0 0; color: var(--enc-muted); font-size: 0.78rem; line-height: 1.55; }
+  .enc-attribution-link { color: var(--enc-accent); text-decoration: none; }
+  .enc-attribution-link:hover { text-decoration: underline; }
+  .enc-input-with-action { display: flex; align-items: center; gap: 8px; }
+  .enc-input-with-action select { flex: 1 1 auto; }
+  .enc-input-with-action .enc-compact-button { flex: 0 0 auto; }
+  .enc-form label small { color: var(--enc-muted); font-size: 0.72rem; font-weight: 500; }
+  .enc-modal-backdrop-top { z-index: 1100; }
+  .enc-source-modal { width: min(700px, 100%); }
+  .enc-source-list { display: flex; flex-direction: column; gap: 9px; margin: 0 0 18px; padding: 0; list-style: none; }
+  .enc-source-item { padding: 12px 14px; border: 1px solid var(--enc-border); border-radius: 12px; background: var(--enc-panel); }
+  .enc-source-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .enc-source-item p { margin: 6px 0 0; color: var(--enc-muted); font-size: 0.8rem; line-height: 1.5; }
+  .enc-source-item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 6px; color: var(--enc-muted); font-size: 0.76rem; }
+  .enc-source-form { padding-top: 18px; border-top: 1px solid var(--enc-border); }
   .enc-link-button { padding: 4px 0; border: 0; color: var(--enc-accent); background: none; font: inherit; font-size: 0.78rem; font-weight: 650; cursor: pointer; }
   .enc-link-button:hover:not(:disabled) { text-decoration: underline; }
   .enc-link-button:disabled { opacity: 0.5; cursor: not-allowed; }

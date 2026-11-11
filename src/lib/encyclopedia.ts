@@ -2,6 +2,29 @@ import Database from '@tauri-apps/plugin-sql';
 
 export type CatalogGameType = 'official' | 'fangame' | 'rom_hack' | 'other';
 
+export type DataSource = {
+  id: number;
+  source_key: string;
+  name: string;
+  source_type: string;
+  homepage_url: string;
+  api_base_url: string;
+  license_name: string;
+  attribution_text: string;
+  terms_url: string;
+  is_enabled: number;
+};
+
+export type DataSourceInput = {
+  source_key: string;
+  name: string;
+  source_type: string;
+  homepage_url: string;
+  license_name: string;
+  attribution_text: string;
+  terms_url: string;
+};
+
 export type CatalogGame = {
   id: number;
   slug: string;
@@ -13,6 +36,11 @@ export type CatalogGame = {
   official_url: string;
   version_count: number;
   primary_version: string | null;
+  source_id: number | null;
+  source_name: string | null;
+  source_attribution: string | null;
+  source_homepage: string | null;
+  source_license: string | null;
 };
 
 export type CatalogGameInput = {
@@ -25,11 +53,12 @@ export type CatalogGameInput = {
   official_url: string;
   version_label: string;
   platform: string;
+  source_id: number | null;
 };
 
 export type CatalogGameUpdateInput = Pick<
   CatalogGameInput,
-  'slug' | 'name' | 'developer' | 'game_type' | 'description' | 'cover_url' | 'official_url'
+  'slug' | 'name' | 'developer' | 'game_type' | 'description' | 'cover_url' | 'official_url' | 'source_id'
 >;
 
 export type CatalogGameVersion = {
@@ -40,6 +69,11 @@ export type CatalogGameVersion = {
   release_date: string;
   notes: string;
   is_default: number;
+  source_id: number | null;
+  source_name: string | null;
+  source_attribution: string | null;
+  source_homepage: string | null;
+  source_license: string | null;
 };
 
 export type CatalogGameVersionInput = {
@@ -48,6 +82,7 @@ export type CatalogGameVersionInput = {
   release_date: string;
   notes: string;
   is_default: boolean;
+  source_id: number | null;
 };
 
 export type VersionSummary = {
@@ -78,6 +113,107 @@ async function getDatabase(): Promise<Database> {
   return databasePromise;
 }
 
+function slugifySourceKey(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+async function validateSourceId(
+  db: Database,
+  sourceId: number | null
+): Promise<number | null> {
+  if (sourceId === null) return null;
+
+  if (!Number.isSafeInteger(sourceId) || sourceId <= 0) {
+    throw new Error('La fuente seleccionada no es válida.');
+  }
+
+  const rows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM data_sources WHERE id = $1',
+    [sourceId]
+  );
+
+  if ((rows[0]?.total ?? 0) === 0) {
+    throw new Error('La fuente seleccionada ya no existe.');
+  }
+
+  return sourceId;
+}
+
+export async function listDataSources(): Promise<DataSource[]> {
+  const db = await getDatabase();
+
+  return db.select<DataSource[]>(`
+    SELECT
+      id,
+      source_key,
+      name,
+      source_type,
+      homepage_url,
+      api_base_url,
+      license_name,
+      attribution_text,
+      terms_url,
+      is_enabled
+    FROM data_sources
+    ORDER BY name COLLATE NOCASE ASC
+  `);
+}
+
+export async function createDataSource(input: DataSourceInput): Promise<number> {
+  const db = await getDatabase();
+  const name = input.name.trim();
+  const sourceKey = input.source_key.trim() || slugifySourceKey(name);
+
+  if (!name) {
+    throw new Error('La fuente necesita un nombre.');
+  }
+
+  if (!sourceKey) {
+    throw new Error('La fuente necesita una clave interna.');
+  }
+
+  const result = await db.execute(`
+    INSERT INTO data_sources (
+      source_key,
+      name,
+      source_type,
+      homepage_url,
+      license_name,
+      attribution_text,
+      terms_url
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+  `, [
+    sourceKey,
+    name,
+    input.source_type.trim() || 'manual',
+    input.homepage_url.trim(),
+    input.license_name.trim(),
+    input.attribution_text.trim(),
+    input.terms_url.trim()
+  ]);
+
+  if (typeof result.lastInsertId === 'number') {
+    return result.lastInsertId;
+  }
+
+  const rows = await db.select<Array<{ id: number }>>(
+    'SELECT id FROM data_sources WHERE source_key = $1 LIMIT 1',
+    [sourceKey]
+  );
+
+  if (typeof rows[0]?.id !== 'number') {
+    throw new Error('La fuente se ha guardado, pero no se ha podido recuperar su identificador.');
+  }
+
+  return rows[0].id;
+}
+
 export async function listCatalogGames(): Promise<CatalogGame[]> {
   const db = await getDatabase();
 
@@ -91,6 +227,11 @@ export async function listCatalogGames(): Promise<CatalogGame[]> {
       cg.description,
       cg.cover_url,
       cg.official_url,
+      cg.source_id,
+      ds.name AS source_name,
+      ds.attribution_text AS source_attribution,
+      ds.homepage_url AS source_homepage,
+      ds.license_name AS source_license,
       (
         SELECT COUNT(*)
         FROM game_versions gv
@@ -104,6 +245,7 @@ export async function listCatalogGames(): Promise<CatalogGame[]> {
         LIMIT 1
       ) AS primary_version
     FROM catalog_games cg
+    LEFT JOIN data_sources ds ON ds.id = cg.source_id
     ORDER BY cg.name COLLATE NOCASE ASC
   `);
 }
@@ -115,16 +257,22 @@ export async function listCatalogGameVersions(
 
   return db.select<CatalogGameVersion[]>(`
     SELECT
-      id,
-      catalog_game_id,
-      version_label,
-      platform,
-      release_date,
-      notes,
-      is_default
-    FROM game_versions
-    WHERE catalog_game_id = $1
-    ORDER BY is_default DESC, id ASC
+      gv.id,
+      gv.catalog_game_id,
+      gv.version_label,
+      gv.platform,
+      gv.release_date,
+      gv.notes,
+      gv.is_default,
+      gv.source_id,
+      ds.name AS source_name,
+      ds.attribution_text AS source_attribution,
+      ds.homepage_url AS source_homepage,
+      ds.license_name AS source_license
+    FROM game_versions gv
+    LEFT JOIN data_sources ds ON ds.id = gv.source_id
+    WHERE gv.catalog_game_id = $1
+    ORDER BY gv.is_default DESC, gv.id ASC
   `, [catalogGameId]);
 }
 
@@ -156,6 +304,7 @@ export async function createCatalogGameVersion(
   const db = await getDatabase();
   const { versionLabel, platform, releaseDate, notes, isDefault } =
     normalizeVersionInput(input);
+  const sourceId = await validateSourceId(db, input.source_id);
 
   const gameRows = await db.select<Array<{ total: number }>>(
     'SELECT COUNT(*) AS total FROM catalog_games WHERE id = $1',
@@ -178,15 +327,17 @@ export async function createCatalogGameVersion(
       platform,
       release_date,
       notes,
-      is_default
-    ) VALUES ($1, $2, $3, $4, $5, $6)
+      is_default,
+      source_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
   `, [
     catalogGameId,
     versionLabel,
     platform,
     releaseDate,
     notes,
-    hasVersions ? isDefault : 1
+    hasVersions ? isDefault : 1,
+    sourceId
   ]);
 
   if (typeof result.lastInsertId === 'number') {
@@ -214,6 +365,7 @@ export async function updateCatalogGameVersion(
   const db = await getDatabase();
   const { versionLabel, platform, releaseDate, notes, isDefault } =
     normalizeVersionInput(input);
+  const sourceId = await validateSourceId(db, input.source_id);
 
   const currentRows = await db.select<Array<{
     catalog_game_id: number;
@@ -235,9 +387,10 @@ export async function updateCatalogGameVersion(
       release_date = $3,
       notes = $4,
       is_default = $5,
+      source_id = $6,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $6
-  `, [versionLabel, platform, releaseDate, notes, isDefault, versionId]);
+    WHERE id = $7
+  `, [versionLabel, platform, releaseDate, notes, isDefault, sourceId, versionId]);
 
   if (current.is_default === 1 && isDefault === 0) {
     const others = await db.select<Array<{ id: number }>>(
@@ -472,6 +625,8 @@ export async function createCatalogGame(input: CatalogGameInput): Promise<number
     throw new Error('El nombre, el identificador y la versión son obligatorios.');
   }
 
+  const sourceId = await validateSourceId(db, input.source_id);
+
   await db.execute(`
     INSERT INTO catalog_games (
       slug,
@@ -480,8 +635,9 @@ export async function createCatalogGame(input: CatalogGameInput): Promise<number
       game_type,
       description,
       cover_url,
-      official_url
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      official_url,
+      source_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
   `, [
     slug,
     name,
@@ -489,7 +645,8 @@ export async function createCatalogGame(input: CatalogGameInput): Promise<number
     input.game_type,
     input.description.trim(),
     input.cover_url.trim(),
-    input.official_url.trim()
+    input.official_url.trim(),
+    sourceId
   ]);
 
   const createdRows = await db.select<Array<{ id: number }>>(
@@ -508,9 +665,10 @@ export async function createCatalogGame(input: CatalogGameInput): Promise<number
         catalog_game_id,
         version_label,
         platform,
-        is_default
-      ) VALUES ($1, $2, $3, 1)
-    `, [catalogGameId, versionLabel, input.platform]);
+        is_default,
+        source_id
+      ) VALUES ($1, $2, $3, 1, $4)
+    `, [catalogGameId, versionLabel, input.platform, sourceId]);
   } catch (error) {
     try {
       await db.execute('DELETE FROM catalog_games WHERE id = $1', [catalogGameId]);
@@ -536,6 +694,8 @@ export async function updateCatalogGame(
     throw new Error('El nombre y el identificador son obligatorios.');
   }
 
+  const sourceId = await validateSourceId(db, input.source_id);
+
   // Solo actualiza los metadatos generales. Las versiones y sus datos asociados
   // permanecen intactos.
   await db.execute(`
@@ -547,8 +707,9 @@ export async function updateCatalogGame(
       description = $5,
       cover_url = $6,
       official_url = $7,
+      source_id = $8,
       updated_at = CURRENT_TIMESTAMP
-    WHERE id = $8
+    WHERE id = $9
   `, [
     slug,
     name,
@@ -557,6 +718,7 @@ export async function updateCatalogGame(
     input.description.trim(),
     input.cover_url.trim(),
     input.official_url.trim(),
+    sourceId,
     catalogGameId
   ]);
 }
