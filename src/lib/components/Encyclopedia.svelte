@@ -28,6 +28,7 @@
       type LinkableLibraryGame,
       type VersionSummary
   } from '$lib/encyclopedia';
+  import PokedexView from '$lib/components/PokedexView.svelte';
   import { onMount } from 'svelte';
 
   type CategoryFilter = 'all' | CatalogGameType;
@@ -789,12 +790,21 @@
         </div>
       </div>
     {:else if detailTab === 'pokedex'}
-      <div class="enc-empty-panel">
-        <span class="enc-empty-icon">◈</span>
-        <h2>Pokédex de {selectedGame.name}</h2>
-        <p>{summary?.pokemon_count ? `Hay ${summary.pokemon_count} entradas registradas en esta versión.` : 'Todavía no hay Pokémon registrados para esta versión.'}</p>
-        <span class="enc-subtle">La importación y edición de entradas será el siguiente bloque de desarrollo.</span>
-      </div>
+      {#if selectedVersion}
+        <PokedexView
+          gameName={selectedGame.name}
+          versionLabel={selectedVersion.version_label}
+          versionId={selectedVersion.id}
+          onChanged={() => void refreshVersionSummary()}
+        />
+      {:else}
+        <div class="enc-empty-panel">
+          <span class="enc-empty-icon">◈</span>
+          <h2>Pokédex de {selectedGame.name}</h2>
+          <p>Añade una versión a esta ficha para empezar a registrar sus Pokémon.</p>
+          <span class="enc-subtle">Cada versión mantiene su propia Pokédex, independiente del resto.</span>
+        </div>
+      {/if}
     {:else if detailTab === 'world'}
       <div class="enc-stat-grid enc-stat-grid-world">
         <div class="enc-stat"><span>Regiones</span><strong>{summary?.region_count ?? '—'}</strong></div>

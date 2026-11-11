@@ -489,6 +489,12 @@ pub fn run() {
             sql: include_str!("migrations/0011_catalog_version_integrity.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 12,
+            description: "pokemon_forms",
+            sql: include_str!("migrations/0012_pokemon_forms.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

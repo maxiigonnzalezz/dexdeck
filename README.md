@@ -63,7 +63,7 @@ El objetivo es que DexDeck permita descubrir un juego, conocerlo a fondo, prepar
 
 ## 🧭 Estado del proyecto
 
-DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca personal ya dispone de funciones reales de gestión y lanzamiento de ejecutables Windows mediante Wine. La Enciclopedia tiene integrada su primera estructura de catálogo y base de datos; sus apartados de Pokédex, mundo y guías todavía necesitan implementación funcional.
+DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca personal ya dispone de funciones reales de gestión y lanzamiento de ejecutables Windows mediante Wine. La Enciclopedia tiene un catálogo completo con versiones, fuentes y vínculos, y una Pokédex por versión que ya permite registrar entradas a mano; sus apartados de mundo y guías todavía necesitan implementación funcional.
 
 | Área | Estado | Situación actual |
 |---|---|---|
@@ -77,7 +77,7 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 | Versiones de juegos | ✅ Funcional | Varias versiones por ficha, edición, borrado y versión predeterminada |
 | Fuentes y atribución | ✅ Implementadas | Registro de fuentes y atribución por ficha y versión |
 | Vínculos con la biblioteca | ✅ Implementados | Vincular, desvincular y mover entradas de la biblioteca |
-| Pokédex por versión | 🗺️ Estructura preparada | Tablas y pantalla inicial; falta gestionar e importar datos |
+| Pokédex por versión | 🚧 En desarrollo | Alta, edición y borrado manual; formas por número, tipos, habilidades y estadísticas. Falta importación y número nacional |
 | Regiones y ubicaciones | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Encuentros y objetos | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Mapas y guías | 🗺️ Estructura preparada | Modelo de datos; falta editor y visor funcional |
@@ -152,9 +152,10 @@ La primera versión incluye:
 - Creación de una primera versión asociada al juego.
 - Consulta de la ficha y selección de versión.
 - Resumen de cantidades registradas para cada versión.
-- Pestañas de Resumen, Pokédex, Mundo y Guías, todavía en fase inicial.
+- Pokédex por versión con alta, edición y borrado manual de entradas, formas con el mismo número, tipos, habilidades, estadísticas y descripción.
+- Pestañas de Resumen, Pokédex, Mundo y Guías; Mundo y Guías siguen en fase inicial.
 
-Los apartados que muestran mensajes como «todavía no hay Pokémon registrados» son estados iniciales de la interfaz. No representan una Pokédex completa ni datos importados.
+Las entradas de la Pokédex se crean a mano por ahora: todavía no hay importación de datos ni número nacional. Las secciones de Mundo y Guías muestran estados iniciales de la interfaz.
 
 ---
 
@@ -262,14 +263,14 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 
 ### Fase 3 — Pokédex por juego y versión
 
-- [ ] Listado de Pokémon con búsqueda, filtros y ordenación.
-- [ ] Número nacional y número de Pokédex local.
-- [ ] Sprites, nombres, tipos y formas.
-- [ ] Habilidades y estadísticas base.
-- [ ] Descripciones de Pokédex.
+- [x] Listado de Pokémon con búsqueda y ordenación.
+- [ ] Número nacional; el número local ya se guarda por entrada.
+- [x] Sprites por URL, nombres, tipos y formas.
+- [x] Habilidades y estadísticas base.
+- [x] Descripciones de Pokédex.
 - [ ] Evoluciones y métodos de evolución.
 - [ ] Movimientos y métodos de aprendizaje.
-- [ ] Disponibilidad y exclusividad por versión.
+- [x] Disponibilidad por versión mediante la marca de obtenible.
 - [ ] Gestión de Fakémon y especies personalizadas.
 - [ ] Herramientas para importar y revisar datos.
 
@@ -439,6 +440,16 @@ Estas ideas no forman parte del alcance implementado; son posibilidades que enca
 ## 🗓️ Registro de progreso
 
 Este apartado se actualizará conforme se implementen y verifiquen nuevas funciones. Se registrarán por separado los cambios terminados, los que están en curso y las validaciones pendientes.
+
+### 11 de noviembre de 2026 — Arranque de la Fase 3: Pokédex por versión
+
+- ✅ Migración 12: `UNIQUE (game_version_id, dex_number, form_name)` para admitir varias formas con el mismo número local; encuentros y triggers conservados.
+- ✅ Capa de datos `src/lib/pokedex.ts` con listado, alta, edición y borrado por versión, validación de fuente y mensajes de error propios.
+- ✅ Vista `PokedexView.svelte` integrada en la pestaña Pokédex: búsqueda, orden por número o nombre, estado vacío, aviso de error y contador.
+- ✅ Diálogo de alta y edición con número local, nombre, forma, tipos, habilidades, estadísticas base, descripción, sprite y marca de obtenible.
+- ✅ Borrado con confirmación que actualiza el contador del Resumen.
+- 🧪 Comprobado en la app real: migración aplicada sobre la base existente, dos formas del número 25, edición, borrado y recuento actualizado; copia previa guardada como `dexdeck-pre-fase3`.
+- 🧪 `pnpm check` (0 errores, 0 avisos), `pnpm build` y `cargo test` (8 pruebas) correctos.
 
 ### 11 de noviembre de 2026 — Fase 2 del catálogo
 
