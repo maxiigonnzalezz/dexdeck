@@ -1,11 +1,14 @@
 <script lang="ts">
   import {
       createCatalogGame,
-      updateCatalogGame,
+      deleteCatalogGame,
+      getCatalogGameDeletionInfo,
       getVersionSummary,
       listCatalogGameVersions,
       listCatalogGames,
+      updateCatalogGame,
       type CatalogGame,
+      type CatalogGameDeletionInfo,
       type CatalogGameUpdateInput,
       type CatalogGameType,
       type CatalogGameVersion,
@@ -30,6 +33,10 @@
   let selectedVersionId = $state<number | null>(null);
   let summary = $state<VersionSummary | null>(null);
   let detailTab = $state<DetailTab>('overview');
+  let showDeleteConfirm = $state(false);
+  let deleting = $state(false);
+  let deleteInfo = $state<CatalogGameDeletionInfo | null>(null);
+  let deleteError = $state('');
 
   let draft = $state({
     name: '',
@@ -172,10 +179,53 @@
     showForm = true;
   }
 
+  async function openDeleteConfirm() {
+    if (!selectedGame) return;
+
+    deleteInfo = null;
+    deleteError = '';
+    showDeleteConfirm = true;
+
+    try {
+      deleteInfo = await getCatalogGameDeletionInfo(selectedGame.id);
+    } catch (error) {
+      console.error('Error al consultar el contenido de la ficha:', error);
+      deleteError = 'No se han podido consultar las versiones y vínculos de esta ficha.';
+    }
+  }
+
+  async function confirmDeleteGame() {
+    if (!selectedGame) return;
+
+    const game = selectedGame;
+    deleting = true;
+    deleteError = '';
+
+    try {
+      await deleteCatalogGame(game.id);
+      showDeleteConfirm = false;
+      selectedGame = null;
+      versions = [];
+      selectedVersionId = null;
+      summary = null;
+      deleteInfo = null;
+      await refreshCatalog();
+    } catch (error) {
+      console.error('Error al eliminar la ficha del catálogo:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      deleteError = `No se ha podido eliminar la ficha: ${message}`;
+    } finally {
+      deleting = false;
+    }
+  }
+
   async function openGame(game: CatalogGame) {
     selectedGame = game;
     pageError = '';
     detailTab = 'overview';
+    showDeleteConfirm = false;
+    deleteInfo = null;
+    deleteError = '';
     versions = [];
     selectedVersionId = null;
     summary = null;
@@ -242,7 +292,7 @@
 <section class="encyclopedia">
   {#if selectedGame}
     <div class="enc-detail-topline">
-      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; }}>
+      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; showDeleteConfirm = false; deleteInfo = null; deleteError = ''; }}>
         <span aria-hidden="true">←</span> Volver al catálogo
       </button>
       <span class="enc-kicker">FICHA DE JUEGO</span>
@@ -266,7 +316,10 @@
         {#if isHttpUrl(selectedGame.official_url)}
           <a class="enc-external-link" href={selectedGame.official_url} target="_blank" rel="noreferrer">Web del proyecto ↗</a>
         {/if}
-        <button class="enc-secondary-button" type="button" onclick={openEditForm}>Editar ficha</button>
+        <div class="enc-hero-actions">
+          <button class="enc-secondary-button" type="button" onclick={openEditForm}>Editar ficha</button>
+          <button class="enc-danger-button" type="button" onclick={() => void openDeleteConfirm()}>Eliminar ficha</button>
+        </div>
       </div>
     </header>
 
@@ -458,6 +511,47 @@
       </dialog>
     </div>
   {/if}
+
+  {#if showDeleteConfirm && selectedGame}
+    <div class="enc-modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !deleting) showDeleteConfirm = false; }}>
+      <dialog open class="enc-modal enc-delete-modal" aria-modal="true" aria-labelledby="enc-delete-title">
+        <div class="enc-modal-heading">
+          <div>
+            <span class="enc-kicker">ELIMINAR FICHA</span>
+            <h2 id="enc-delete-title">Eliminar «{selectedGame.name}»</h2>
+          </div>
+          <button class="enc-close-button" type="button" aria-label="Cerrar" disabled={deleting} onclick={() => showDeleteConfirm = false}>×</button>
+        </div>
+        <p class="enc-modal-intro">
+          Esta acción solo afecta al catálogo de la Enciclopedia. Los juegos de tu biblioteca personal no se borran.
+        </p>
+
+        {#if deleteInfo}
+          <ul class="enc-delete-summary">
+            <li>
+              Se eliminarán <strong>{deleteInfo.version_count}</strong>
+              {deleteInfo.version_count === 1 ? 'versión' : 'versiones'} y todo su contenido asociado.
+            </li>
+            <li>
+              Se desvincularán <strong>{deleteInfo.link_count}</strong>
+              {deleteInfo.link_count === 1 ? 'entrada' : 'entradas'} de la biblioteca. Las entradas seguirán existiendo.
+            </li>
+          </ul>
+        {:else if !deleteError}
+          <p class="enc-muted">Consultando versiones y vínculos…</p>
+        {/if}
+
+        {#if deleteError}<div class="enc-alert" role="alert">{deleteError}</div>{/if}
+
+        <div class="enc-form-actions">
+          <button class="enc-secondary-button" type="button" disabled={deleting} onclick={() => showDeleteConfirm = false}>Cancelar</button>
+          <button class="enc-danger-button" type="button" disabled={deleting || !deleteInfo} onclick={() => void confirmDeleteGame()}>
+            {deleting ? 'Eliminando...' : 'Eliminar ficha del catálogo'}
+          </button>
+        </div>
+      </dialog>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -525,6 +619,10 @@
   .enc-primary-button:hover:not(:disabled), .enc-secondary-button:hover:not(:disabled) { transform: translateY(-1px); }
   .enc-primary-button:disabled, .enc-secondary-button:disabled { opacity: 0.55; cursor: not-allowed; }
   .enc-secondary-button { color: inherit; background: var(--enc-panel-strong); border-color: var(--enc-border); }
+  .enc-danger-button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 17px; border: 1px solid rgba(248, 113, 113, 0.35); border-radius: 12px; color: #fca5a5; background: rgba(127, 29, 29, 0.16); font: inherit; font-size: 0.88rem; font-weight: 700; cursor: pointer; transition: transform 140ms ease, background 140ms ease, opacity 140ms ease; }
+  .enc-danger-button:hover:not(:disabled) { transform: translateY(-1px); background: rgba(127, 29, 29, 0.28); }
+  .enc-danger-button:disabled { opacity: 0.55; cursor: not-allowed; }
+  .enc-hero-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
 
   .enc-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 21px; }
   .enc-filter-row button, .enc-tabs button { border: 1px solid transparent; border-radius: 999px; padding: 9px 13px; color: var(--enc-muted); background: transparent; font: inherit; font-size: 0.82rem; cursor: pointer; }
@@ -596,6 +694,8 @@
   .enc-form label small { color: var(--enc-muted); font-size: 0.72rem; font-weight: 400; }
   .enc-form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; }
   .enc-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 5px; }
+  .enc-delete-summary { display: flex; flex-direction: column; gap: 9px; margin: 0 0 18px; padding: 15px 18px 15px 32px; border: 1px solid rgba(248, 113, 113, 0.22); border-radius: 12px; background: rgba(127, 29, 29, 0.09); color: var(--enc-muted); font-size: 0.86rem; line-height: 1.55; }
+  .enc-delete-summary strong { color: var(--enc-text, inherit); }
 
   @media (max-width: 950px) { .enc-game-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 650px) {

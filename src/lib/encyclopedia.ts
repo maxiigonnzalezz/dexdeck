@@ -52,6 +52,11 @@ export type VersionSummary = {
   map_count: number;
 };
 
+export type CatalogGameDeletionInfo = {
+  version_count: number;
+  link_count: number;
+};
+
 let databasePromise: Promise<Database> | undefined;
 
 async function getDatabase(): Promise<Database> {
@@ -239,4 +244,55 @@ export async function updateCatalogGame(
     input.official_url.trim(),
     catalogGameId
   ]);
+}
+
+export async function getCatalogGameDeletionInfo(
+  catalogGameId: number
+): Promise<CatalogGameDeletionInfo> {
+  const db = await getDatabase();
+  const rows = await db.select<CatalogGameDeletionInfo[]>(`
+    SELECT
+      (SELECT COUNT(*) FROM game_versions WHERE catalog_game_id = $1) AS version_count,
+      (SELECT COUNT(*) FROM installed_game_catalog_links WHERE catalog_game_id = $1) AS link_count
+  `, [catalogGameId]);
+
+  if (!rows[0]) {
+    throw new Error('No se ha podido consultar el contenido de esta ficha.');
+  }
+
+  return rows[0];
+}
+
+export async function deleteCatalogGame(
+  catalogGameId: number
+): Promise<CatalogGameDeletionInfo> {
+  const db = await getDatabase();
+  const existing = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM catalog_games WHERE id = $1',
+    [catalogGameId]
+  );
+
+  if ((existing[0]?.total ?? 0) === 0) {
+    throw new Error('La ficha del catálogo ya no existe.');
+  }
+
+  const info = await getCatalogGameDeletionInfo(catalogGameId);
+
+  // Los vínculos con la biblioteca se eliminan explícitamente. Las filas de
+  // `games` nunca se borran desde el catálogo.
+  await db.execute(
+    'DELETE FROM installed_game_catalog_links WHERE catalog_game_id = $1',
+    [catalogGameId]
+  );
+
+  // Las versiones se van con la ficha mediante ON DELETE CASCADE.
+  await db.execute('DELETE FROM catalog_games WHERE id = $1', [catalogGameId]);
+
+  // Salvaguarda por si SQLite no tuviera activadas las claves foráneas.
+  await db.execute(
+    'DELETE FROM game_versions WHERE catalog_game_id = $1',
+    [catalogGameId]
+  );
+
+  return info;
 }
