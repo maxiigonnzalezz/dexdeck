@@ -1,17 +1,21 @@
 <script lang="ts">
   import {
       createCatalogGame,
+      createCatalogGameVersion,
       deleteCatalogGame,
+      deleteCatalogGameVersion,
       getCatalogGameDeletionInfo,
       getVersionSummary,
       listCatalogGameVersions,
       listCatalogGames,
       updateCatalogGame,
+      updateCatalogGameVersion,
       type CatalogGame,
       type CatalogGameDeletionInfo,
       type CatalogGameUpdateInput,
       type CatalogGameType,
       type CatalogGameVersion,
+      type CatalogGameVersionInput,
       type VersionSummary
   } from '$lib/encyclopedia';
   import { onMount } from 'svelte';
@@ -37,6 +41,19 @@
   let deleting = $state(false);
   let deleteInfo = $state<CatalogGameDeletionInfo | null>(null);
   let deleteError = $state('');
+  let showVersionManager = $state(false);
+  let versionFormMode = $state<'create' | 'edit'>('create');
+  let editingVersionId = $state<number | null>(null);
+  let versionError = $state('');
+  let versionSaving = $state(false);
+  let versionPendingDelete = $state<CatalogGameVersion | null>(null);
+  let versionDraft = $state<CatalogGameVersionInput>({
+    version_label: '',
+    platform: 'unknown',
+    release_date: '',
+    notes: '',
+    is_default: false
+  });
 
   let draft = $state({
     name: '',
@@ -58,6 +75,10 @@
       const matchesCategory = categoryFilter === 'all' || game.game_type === categoryFilter;
       return matchesSearch && matchesCategory;
     })
+  );
+
+  let selectedVersion = $derived(
+    versions.find((version) => version.id === selectedVersionId) ?? null
   );
 
   onMount(() => {
@@ -257,6 +278,149 @@
     await refreshVersionSummary();
   }
 
+  function refreshSelectedGame() {
+    if (!selectedGame) return;
+
+    const gameId = selectedGame.id;
+    selectedGame = games.find((game) => game.id === gameId) ?? selectedGame;
+  }
+
+  function resetVersionDraft() {
+    versionFormMode = 'create';
+    editingVersionId = null;
+    versionPendingDelete = null;
+    versionError = '';
+    versionDraft = {
+      version_label: '',
+      platform: 'unknown',
+      release_date: '',
+      notes: '',
+      is_default: false
+    };
+  }
+
+  function openVersionManager() {
+    resetVersionDraft();
+    showVersionManager = true;
+  }
+
+  function startCreateVersion() {
+    resetVersionDraft();
+  }
+
+  function startEditVersion(version: CatalogGameVersion) {
+    versionFormMode = 'edit';
+    editingVersionId = version.id;
+    versionPendingDelete = null;
+    versionError = '';
+    versionDraft = {
+      version_label: version.version_label,
+      platform: version.platform,
+      release_date: version.release_date,
+      notes: version.notes,
+      is_default: version.is_default === 1
+    };
+  }
+
+  async function reloadVersions(preferredVersionId?: number) {
+    if (!selectedGame) return;
+
+    const targetId = preferredVersionId ?? selectedVersionId;
+    versions = await listCatalogGameVersions(selectedGame.id);
+    selectedVersionId = versions.some((version) => version.id === targetId)
+      ? targetId
+      : versions[0]?.id ?? null;
+    await refreshVersionSummary();
+  }
+
+  async function saveVersion(event: SubmitEvent) {
+    event.preventDefault();
+    if (!selectedGame) return;
+
+    versionError = '';
+
+    if (!versionDraft.version_label.trim()) {
+      versionError = 'Escribe un nombre o número de versión.';
+      return;
+    }
+
+    versionSaving = true;
+    try {
+      let preferredVersionId = editingVersionId ?? undefined;
+
+      if (versionFormMode === 'edit' && editingVersionId !== null) {
+        await updateCatalogGameVersion(editingVersionId, versionDraft);
+      } else {
+        preferredVersionId = await createCatalogGameVersion(selectedGame.id, versionDraft);
+      }
+
+      await refreshCatalog();
+      refreshSelectedGame();
+      await reloadVersions(preferredVersionId);
+      resetVersionDraft();
+    } catch (error) {
+      console.error('Error al guardar la versión:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      versionError = message.includes('UNIQUE')
+        ? 'Ya existe una versión con ese nombre y plataforma en esta ficha.'
+        : message;
+    } finally {
+      versionSaving = false;
+    }
+  }
+
+  async function markDefaultVersion(version: CatalogGameVersion) {
+    if (!selectedGame || version.is_default === 1) return;
+
+    versionSaving = true;
+    versionError = '';
+
+    try {
+      await updateCatalogGameVersion(version.id, {
+        version_label: version.version_label,
+        platform: version.platform,
+        release_date: version.release_date,
+        notes: version.notes,
+        is_default: true
+      });
+      await refreshCatalog();
+      refreshSelectedGame();
+      await reloadVersions(version.id);
+    } catch (error) {
+      console.error('Error al cambiar la versión predeterminada:', error);
+      versionError = error instanceof Error ? error.message : String(error);
+    } finally {
+      versionSaving = false;
+    }
+  }
+
+  function requestDeleteVersion(version: CatalogGameVersion) {
+    versionError = '';
+    versionPendingDelete = version;
+  }
+
+  async function confirmDeleteVersion() {
+    const version = versionPendingDelete;
+    if (!version || !selectedGame) return;
+
+    versionSaving = true;
+    versionError = '';
+
+    try {
+      await deleteCatalogGameVersion(version.id);
+      versionPendingDelete = null;
+      if (editingVersionId === version.id) resetVersionDraft();
+      await refreshCatalog();
+      refreshSelectedGame();
+      await reloadVersions();
+    } catch (error) {
+      console.error('Error al eliminar la versión:', error);
+      versionError = error instanceof Error ? error.message : String(error);
+    } finally {
+      versionSaving = false;
+    }
+  }
+
   function categoryLabel(type: CatalogGameType): string {
     switch (type) {
       case 'official': return 'Juego oficial';
@@ -325,12 +489,26 @@
 
     <div class="enc-version-bar">
       <label for="enc-version-select">Versión consultada</label>
-      <select id="enc-version-select" value={selectedVersionId ?? ''} onchange={(event) => void changeVersion(event.currentTarget.value)}>
-        {#each versions as version (version.id)}
-          <option value={version.id}>{version.version_label} · {platformLabel(version.platform)}</option>
-        {/each}
-      </select>
+      <div class="enc-version-controls">
+        <select id="enc-version-select" value={selectedVersionId ?? ''} onchange={(event) => void changeVersion(event.currentTarget.value)}>
+          {#each versions as version (version.id)}
+            <option value={version.id}>{version.version_label} · {platformLabel(version.platform)}</option>
+          {/each}
+        </select>
+        <button class="enc-secondary-button enc-compact-button" type="button" onclick={openVersionManager}>
+          Gestionar versiones
+        </button>
+      </div>
     </div>
+
+    {#if selectedVersion}
+      <div class="enc-version-meta">
+        <span>{platformLabel(selectedVersion.platform)}</span>
+        {#if selectedVersion.release_date}<span>Lanzamiento: {selectedVersion.release_date}</span>{/if}
+        {#if selectedVersion.is_default === 1}<span class="enc-default-badge">Predeterminada</span>{/if}
+        {#if selectedVersion.notes}<span>{selectedVersion.notes}</span>{/if}
+      </div>
+    {/if}
 
     <nav class="enc-tabs" aria-label="Secciones de la ficha">
       <button type="button" class:active={detailTab === 'overview'} onclick={() => detailTab = 'overview'}>Resumen</button>
@@ -552,6 +730,86 @@
       </dialog>
     </div>
   {/if}
+
+  {#if showVersionManager && selectedGame}
+    <div class="enc-modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !versionSaving) showVersionManager = false; }}>
+      <dialog open class="enc-modal enc-version-modal" aria-modal="true" aria-labelledby="enc-versions-title">
+        <div class="enc-modal-heading">
+          <div>
+            <span class="enc-kicker">VERSIONES</span>
+            <h2 id="enc-versions-title">{selectedGame.name}</h2>
+          </div>
+          <button class="enc-close-button" type="button" aria-label="Cerrar" disabled={versionSaving} onclick={() => showVersionManager = false}>×</button>
+        </div>
+        <p class="enc-modal-intro">
+          Cada ficha conserva al menos una versión. La versión predeterminada es la que se consulta primero.
+        </p>
+
+        {#if versionError}<div class="enc-alert" role="alert">{versionError}</div>{/if}
+
+        <div class="enc-version-list">
+          {#each versions as version (version.id)}
+            <div class="enc-version-item" class:is-default={version.is_default === 1}>
+              <div class="enc-version-item-copy">
+                <div class="enc-version-item-title">
+                  <strong>{version.version_label}</strong>
+                  <span>{platformLabel(version.platform)}</span>
+                  {#if version.is_default === 1}<span class="enc-default-badge">Predeterminada</span>{/if}
+                </div>
+                {#if version.release_date}<span class="enc-version-date">Lanzamiento: {version.release_date}</span>{/if}
+                {#if version.notes}<p>{version.notes}</p>{/if}
+              </div>
+              <div class="enc-version-actions">
+                {#if version.is_default !== 1}
+                  <button type="button" disabled={versionSaving} onclick={() => void markDefaultVersion(version)}>Marcar predeterminada</button>
+                {/if}
+                <button type="button" disabled={versionSaving} onclick={() => startEditVersion(version)}>Editar</button>
+                <button class="enc-mini-danger" type="button" disabled={versionSaving || versions.length <= 1} onclick={() => requestDeleteVersion(version)}>Eliminar</button>
+              </div>
+            </div>
+          {/each}
+        </div>
+
+        {#if versionPendingDelete}
+          <div class="enc-version-confirm" role="alert">
+            <p>
+              ¿Eliminar la versión <strong>{versionPendingDelete.version_label} · {platformLabel(versionPendingDelete.platform)}</strong>?
+              También se borrarán sus datos asociados.
+            </p>
+            <div class="enc-form-actions">
+              <button class="enc-secondary-button" type="button" disabled={versionSaving} onclick={() => versionPendingDelete = null}>Cancelar</button>
+              <button class="enc-danger-button" type="button" disabled={versionSaving} onclick={() => void confirmDeleteVersion()}>
+                {versionSaving ? 'Eliminando...' : 'Eliminar versión'}
+              </button>
+            </div>
+          </div>
+        {/if}
+
+        <form class="enc-form enc-version-form" onsubmit={saveVersion}>
+          <div class="enc-form-section-title">
+            {versionFormMode === 'edit' ? 'Editar versión' : 'Añadir versión'}
+          </div>
+          <div class="enc-form-row">
+            <label>Versión <input required maxlength="80" bind:value={versionDraft.version_label} placeholder="1.0" /></label>
+            <label>Plataforma <select bind:value={versionDraft.platform}><option value="unknown">Sin especificar</option><option value="windows">Windows</option><option value="gba">Game Boy Advance</option><option value="nds">Nintendo DS</option><option value="3ds">Nintendo 3DS</option><option value="switch">Nintendo Switch</option><option value="other">Otra</option></select></label>
+          </div>
+          <div class="enc-form-row">
+            <label>Fecha de lanzamiento <input type="date" bind:value={versionDraft.release_date} /></label>
+            <label class="enc-checkbox-label"><input type="checkbox" bind:checked={versionDraft.is_default} disabled={versionFormMode === 'edit' && versions.length <= 1} /> Versión predeterminada</label>
+          </div>
+          <label>Notas <textarea rows="2" maxlength="1200" bind:value={versionDraft.notes} placeholder="Cambios, edición o detalles de esta versión..."></textarea></label>
+          <div class="enc-form-actions">
+            {#if versionFormMode === 'edit'}
+              <button class="enc-secondary-button" type="button" disabled={versionSaving} onclick={resetVersionDraft}>Cancelar edición</button>
+            {/if}
+            <button class="enc-primary-button" type="submit" disabled={versionSaving}>
+              {versionSaving ? 'Guardando...' : versionFormMode === 'edit' ? 'Guardar versión' : 'Añadir versión'}
+            </button>
+          </div>
+        </form>
+      </dialog>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -668,6 +926,10 @@
   .enc-version-bar { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 20px 0 12px; color: var(--enc-muted); font-size: 0.82rem; }
   .enc-version-bar select, .enc-form input, .enc-form select, .enc-form textarea { width: 100%; min-width: 0; color: inherit; border: 1px solid var(--enc-border); border-radius: 10px; background: var(--enc-input); font: inherit; outline: none; }
   .enc-version-bar select { width: auto; max-width: 320px; padding: 9px 12px; }
+  .enc-version-controls { display: flex; align-items: center; gap: 10px; }
+  .enc-compact-button { min-height: 38px; padding: 0 13px; font-size: 0.82rem; }
+  .enc-version-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 0 0 12px; color: var(--enc-muted); font-size: 0.78rem; line-height: 1.5; }
+  .enc-default-badge { display: inline-flex; align-items: center; padding: 2px 8px; border: 1px solid rgba(113, 223, 192, 0.28); border-radius: 999px; color: var(--enc-accent); background: rgba(113, 223, 192, 0.09); font-size: 0.66rem; font-weight: 750; letter-spacing: 0.04em; text-transform: uppercase; }
   .enc-form input, .enc-form select, .enc-form textarea { padding: 11px 12px; }
   .enc-form textarea { resize: vertical; }
   .enc-form input:focus, .enc-form select:focus, .enc-form textarea:focus, .enc-version-bar select:focus { border-color: var(--enc-accent); }
@@ -696,6 +958,27 @@
   .enc-form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 5px; }
   .enc-delete-summary { display: flex; flex-direction: column; gap: 9px; margin: 0 0 18px; padding: 15px 18px 15px 32px; border: 1px solid rgba(248, 113, 113, 0.22); border-radius: 12px; background: rgba(127, 29, 29, 0.09); color: var(--enc-muted); font-size: 0.86rem; line-height: 1.55; }
   .enc-delete-summary strong { color: var(--enc-text, inherit); }
+  .enc-version-modal { width: min(820px, 100%); }
+  .enc-version-list { display: flex; flex-direction: column; gap: 9px; margin-bottom: 20px; }
+  .enc-version-item { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 13px 15px; border: 1px solid var(--enc-border); border-radius: 12px; background: var(--enc-panel); }
+  .enc-version-item.is-default { border-color: rgba(113, 223, 192, 0.32); background: rgba(113, 223, 192, 0.055); }
+  .enc-version-item-copy { min-width: 0; }
+  .enc-version-item-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .enc-version-item-title > span:not(.enc-default-badge) { color: var(--enc-muted); font-size: 0.8rem; }
+  .enc-version-date { display: block; margin-top: 5px; color: var(--enc-muted); font-size: 0.76rem; }
+  .enc-version-item-copy p { margin: 6px 0 0; color: var(--enc-muted); font-size: 0.8rem; line-height: 1.45; white-space: pre-line; }
+  .enc-version-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .enc-version-actions button { border: 1px solid var(--enc-border); border-radius: 8px; padding: 6px 9px; color: var(--enc-muted); background: transparent; font: inherit; font-size: 0.74rem; cursor: pointer; }
+  .enc-version-actions button:hover:not(:disabled) { color: var(--enc-accent); border-color: rgba(113, 223, 192, 0.28); }
+  .enc-version-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .enc-version-actions .enc-mini-danger:hover:not(:disabled) { color: #fca5a5; border-color: rgba(248, 113, 113, 0.3); }
+  .enc-version-confirm { margin-bottom: 18px; padding: 14px 16px; border: 1px solid rgba(248, 113, 113, 0.25); border-radius: 12px; background: rgba(127, 29, 29, 0.1); }
+  .enc-version-confirm p { margin: 0 0 12px; color: var(--enc-muted); font-size: 0.84rem; line-height: 1.5; }
+  .enc-version-confirm strong { color: var(--enc-text, inherit); }
+  .enc-version-form { padding-top: 18px; border-top: 1px solid var(--enc-border); }
+  .enc-form-section-title { color: var(--enc-accent); font-size: 0.7rem; letter-spacing: 0.12em; font-weight: 750; text-transform: uppercase; }
+  .enc-form label.enc-checkbox-label { flex-direction: row; align-items: center; gap: 9px; }
+  .enc-form label.enc-checkbox-label input { width: auto; }
 
   @media (max-width: 950px) { .enc-game-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   @media (max-width: 650px) {
@@ -712,5 +995,8 @@
     .enc-modal { padding: 20px; }
     .enc-version-bar { align-items: flex-start; flex-direction: column; }
     .enc-version-bar select { max-width: 100%; width: 100%; }
+    .enc-version-controls { width: 100%; flex-direction: column; align-items: stretch; }
+    .enc-version-item { flex-direction: column; }
+    .enc-version-actions { justify-content: flex-start; }
   }
 </style>

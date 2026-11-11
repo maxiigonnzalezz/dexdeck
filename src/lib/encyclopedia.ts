@@ -42,6 +42,14 @@ export type CatalogGameVersion = {
   is_default: number;
 };
 
+export type CatalogGameVersionInput = {
+  version_label: string;
+  platform: string;
+  release_date: string;
+  notes: string;
+  is_default: boolean;
+};
+
 export type VersionSummary = {
   pokemon_count: number;
   region_count: number;
@@ -118,6 +126,172 @@ export async function listCatalogGameVersions(
     WHERE catalog_game_id = $1
     ORDER BY is_default DESC, id ASC
   `, [catalogGameId]);
+}
+
+function normalizeVersionInput(input: CatalogGameVersionInput) {
+  const versionLabel = input.version_label.trim();
+  const releaseDate = input.release_date.trim();
+
+  if (!versionLabel) {
+    throw new Error('La versión necesita un nombre o número.');
+  }
+
+  if (releaseDate && !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate)) {
+    throw new Error('La fecha de lanzamiento debe tener el formato AAAA-MM-DD.');
+  }
+
+  return {
+    versionLabel,
+    platform: input.platform.trim() || 'unknown',
+    releaseDate,
+    notes: input.notes.trim(),
+    isDefault: input.is_default ? 1 : 0
+  };
+}
+
+export async function createCatalogGameVersion(
+  catalogGameId: number,
+  input: CatalogGameVersionInput
+): Promise<number> {
+  const db = await getDatabase();
+  const { versionLabel, platform, releaseDate, notes, isDefault } =
+    normalizeVersionInput(input);
+
+  const gameRows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM catalog_games WHERE id = $1',
+    [catalogGameId]
+  );
+
+  if ((gameRows[0]?.total ?? 0) === 0) {
+    throw new Error('La ficha del catálogo no existe.');
+  }
+
+  const versionRows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM game_versions WHERE catalog_game_id = $1',
+    [catalogGameId]
+  );
+  const hasVersions = (versionRows[0]?.total ?? 0) > 0;
+  const result = await db.execute(`
+    INSERT INTO game_versions (
+      catalog_game_id,
+      version_label,
+      platform,
+      release_date,
+      notes,
+      is_default
+    ) VALUES ($1, $2, $3, $4, $5, $6)
+  `, [
+    catalogGameId,
+    versionLabel,
+    platform,
+    releaseDate,
+    notes,
+    hasVersions ? isDefault : 1
+  ]);
+
+  if (typeof result.lastInsertId === 'number') {
+    return result.lastInsertId;
+  }
+
+  const createdRows = await db.select<Array<{ id: number }>>(
+    `SELECT id FROM game_versions
+     WHERE catalog_game_id = $1 AND version_label = $2 AND platform = $3
+     LIMIT 1`,
+    [catalogGameId, versionLabel, platform]
+  );
+
+  if (typeof createdRows[0]?.id !== 'number') {
+    throw new Error('La versión se ha guardado, pero no se ha podido recuperar su identificador.');
+  }
+
+  return createdRows[0].id;
+}
+
+export async function updateCatalogGameVersion(
+  versionId: number,
+  input: CatalogGameVersionInput
+): Promise<void> {
+  const db = await getDatabase();
+  const { versionLabel, platform, releaseDate, notes, isDefault } =
+    normalizeVersionInput(input);
+
+  const currentRows = await db.select<Array<{
+    catalog_game_id: number;
+    is_default: number;
+  }>>(
+    'SELECT catalog_game_id, is_default FROM game_versions WHERE id = $1',
+    [versionId]
+  );
+  const current = currentRows[0];
+
+  if (!current) {
+    throw new Error('La versión ya no existe.');
+  }
+
+  await db.execute(`
+    UPDATE game_versions SET
+      version_label = $1,
+      platform = $2,
+      release_date = $3,
+      notes = $4,
+      is_default = $5,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = $6
+  `, [versionLabel, platform, releaseDate, notes, isDefault, versionId]);
+
+  if (current.is_default === 1 && isDefault === 0) {
+    const others = await db.select<Array<{ id: number }>>(
+      `SELECT id FROM game_versions
+       WHERE catalog_game_id = $1 AND id <> $2
+       ORDER BY id ASC
+       LIMIT 1`,
+      [current.catalog_game_id, versionId]
+    );
+
+    if (!others[0]) {
+      await db.execute(
+        'UPDATE game_versions SET is_default = 1 WHERE id = $1',
+        [versionId]
+      );
+      throw new Error('La única versión de una ficha debe seguir siendo la predeterminada.');
+    }
+
+    await db.execute(
+      'UPDATE game_versions SET is_default = 1 WHERE id = $1',
+      [others[0].id]
+    );
+  }
+}
+
+export async function deleteCatalogGameVersion(versionId: number): Promise<void> {
+  const db = await getDatabase();
+  const currentRows = await db.select<Array<{ catalog_game_id: number }>>(
+    'SELECT catalog_game_id FROM game_versions WHERE id = $1',
+    [versionId]
+  );
+  const current = currentRows[0];
+
+  if (!current) {
+    throw new Error('La versión ya no existe.');
+  }
+
+  const countRows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM game_versions WHERE catalog_game_id = $1',
+    [current.catalog_game_id]
+  );
+
+  if ((countRows[0]?.total ?? 0) <= 1) {
+    throw new Error('Cada juego del catálogo debe conservar al menos una versión.');
+  }
+
+  // Los vínculos que apuntaban a esta versión quedan sin versión concreta,
+  // pero conservan su relación con la ficha.
+  await db.execute(
+    'UPDATE installed_game_catalog_links SET catalog_game_version_id = NULL WHERE catalog_game_version_id = $1',
+    [versionId]
+  );
+
+  await db.execute('DELETE FROM game_versions WHERE id = $1', [versionId]);
 }
 
 export async function getVersionSummary(versionId: number): Promise<VersionSummary> {

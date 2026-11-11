@@ -465,6 +465,12 @@ pub fn run() {
             sql: include_str!("migrations/0010_remove_seeded_demo_games.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 11,
+            description: "catalog_version_integrity",
+            sql: include_str!("migrations/0011_catalog_version_integrity.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
