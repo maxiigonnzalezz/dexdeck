@@ -1,9 +1,9 @@
 <script lang="ts">
   import '../app.css';
   import Encyclopedia from '$lib/components/Encyclopedia.svelte';
+  import UpdatesView from '$lib/components/UpdatesView.svelte';
   import SettingsView from '$lib/components/SettingsView.svelte';
   import type {
-    AppUpdateState,
     ExecutableMetadata,
     InstallationInfo,
     SystemInfo,
@@ -23,9 +23,6 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { open } from '@tauri-apps/plugin-dialog';
   import { attachConsole, info } from '@tauri-apps/plugin-log';
-  import { openUrl } from '@tauri-apps/plugin-opener';
-  import { relaunch } from '@tauri-apps/plugin-process';
-  import { check, type Update } from '@tauri-apps/plugin-updater';
   import { onMount } from 'svelte';
 
   let activeSection = $state('Biblioteca');
@@ -67,12 +64,6 @@
 
   let appVersion = $state('0.1.0');
   let installationInfo = $state<InstallationInfo | null>(null);
-  let appUpdateState = $state<AppUpdateState>('idle');
-  let appUpdateMessage = $state('');
-  let appUpdateVersion = $state('');
-  let appUpdateNotes = $state('');
-  let appUpdateProgress = $state(0);
-  let pendingAppUpdate: Update | null = null;
   let uninstallDialog: HTMLDialogElement | undefined = $state(undefined);
   let uninstallChoice = $state<'keep' | 'delete'>('keep');
   let uninstalling = $state(false);
@@ -220,103 +211,6 @@
         canUninstall: false,
         message: 'No se ha podido identificar cómo está instalada DexDeck.'
       };
-    }
-  }
-
-  async function checkForAppUpdates() {
-    if (!installationInfo) return;
-
-    if (installationInfo.kind === 'deb') {
-      appUpdateState = 'manual';
-      appUpdateMessage = 'Los paquetes DEB se actualizan descargando la nueva versión e instalándola con el gestor de paquetes.';
-      try {
-        await openUrl("https://github.com/maxiigonnzalezz/dexdeck/releases/latest");
-      } catch (error) {
-        console.error('No se pudo abrir la página de descargas:', error);
-        appUpdateMessage = 'No se pudo abrir la página de descargas. Puedes acceder a ella desde GitHub Releases.';
-      }
-      return;
-    }
-
-    if (!installationInfo.canUpdate) {
-      appUpdateState = 'error';
-      appUpdateMessage = installationInfo.message || 'Esta instalación no admite actualizaciones automáticas.';
-      return;
-    }
-
-    appUpdateState = 'checking';
-    appUpdateMessage = 'Comprobando si hay una versión nueva…';
-    appUpdateProgress = 0;
-
-    try {
-      if (pendingAppUpdate) {
-        await pendingAppUpdate.close();
-        pendingAppUpdate = null;
-      }
-
-      const update = await check();
-      if (!update) {
-        appUpdateState = 'current';
-        appUpdateMessage = `Ya tienes la versión más reciente (${appVersion}).`;
-        appUpdateVersion = '';
-        appUpdateNotes = '';
-        return;
-      }
-
-      pendingAppUpdate = update;
-      appUpdateVersion = update.version;
-      appUpdateNotes = update.body ?? '';
-      appUpdateState = 'available';
-      appUpdateMessage = `Hay una actualización disponible: ${update.version}. Pulsa «Actualizar» para instalarla.`;
-    } catch (error) {
-      console.error('Error al comprobar actualizaciones:', error);
-      appUpdateState = 'error';
-      appUpdateMessage = 'No se han podido comprobar las actualizaciones. Comprueba tu conexión e inténtalo de nuevo.';
-    }
-  }
-
-  async function installAppUpdate() {
-    if (!pendingAppUpdate || appUpdateState !== 'available') return;
-
-    appUpdateState = 'downloading';
-    appUpdateMessage = `Descargando DexDeck ${appUpdateVersion}…`;
-    appUpdateProgress = 0;
-    let downloaded = 0;
-    let contentLength = 0;
-
-    try {
-      await pendingAppUpdate.downloadAndInstall((event) => {
-        if (event.event === 'Started') {
-          contentLength = event.data.contentLength ?? 0;
-          downloaded = 0;
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          if (contentLength > 0) {
-            appUpdateProgress = Math.min(100, Math.round((downloaded / contentLength) * 100));
-          }
-        } else if (event.event === 'Finished') {
-          appUpdateProgress = 100;
-          appUpdateState = 'installing';
-          appUpdateMessage = 'Descarga completada. Instalando la actualización…';
-        }
-      });
-
-      pendingAppUpdate = null;
-      appUpdateState = 'installing';
-      appUpdateMessage = 'Actualización instalada. Reiniciando DexDeck…';
-      await relaunch();
-    } catch (error) {
-      console.error('No se pudo instalar la actualización:', error);
-      appUpdateState = 'error';
-      appUpdateMessage = 'La actualización no se ha podido instalar. Tu instalación actual se ha conservado.';
-    }
-  }
-
-  function handleAppUpdateAction() {
-    if (appUpdateState === 'available') {
-      void installAppUpdate();
-    } else {
-      void checkForAppUpdates();
     }
   }
 
@@ -1155,70 +1049,10 @@ async function removeSelectedGame() {
         <Encyclopedia />
 
       {:else if activeSection === 'Actualizaciones'}
-        <section class="subpage-header">
-          <div class="eyebrow"><span class="eyebrow-line"></span> SIEMPRE AL DÍA</div>
-          <h1>Centro de <span>actualizaciones.</span></h1>
-          <p class="intro">Mantén DexDeck actualizado y consulta aquí las futuras actualizaciones de tus fangames.</p>
-        </section>
-
-        <div class="settings-panel app-update-panel">
-          <div class="setting-row app-update-row">
-            <div class="setting-icon">↻</div>
-            <div class="setting-copy app-update-copy">
-              <strong>Actualización de DexDeck</strong>
-              <p>Versión instalada: {appVersion}</p>
-              {#if installationInfo}
-                <p>{installationInfo.message}</p>
-              {/if}
-              {#if appUpdateMessage}
-                <p class="app-update-message" role="status">{appUpdateMessage}</p>
-              {/if}
-              {#if appUpdateNotes && appUpdateState === 'available'}
-                <p class="app-update-notes">{appUpdateNotes}</p>
-              {/if}
-              {#if appUpdateState === 'downloading'}
-                <div class="app-update-progress" aria-label="Progreso de descarga">
-                  <span style={`width: ${appUpdateProgress}%`}></span>
-                </div>
-                {#if appUpdateProgress > 0}
-                  <p>{appUpdateProgress}% descargado</p>
-                {/if}
-              {/if}
-            </div>
-            <button
-              type="button"
-              class="primary-button app-update-button"
-              disabled={!installationInfo || (!installationInfo.canUpdate && installationInfo.kind !== 'deb') || ['checking', 'downloading', 'installing'].includes(appUpdateState)}
-              onclick={handleAppUpdateAction}
-            >
-              {#if appUpdateState === 'checking'}Comprobando…{:else if appUpdateState === 'downloading'}Descargando…{:else if appUpdateState === 'installing'}Instalando…{:else if appUpdateState === 'available'}Actualizar ahora{:else}Actualizar{/if}
-            </button>
-          </div>
-        </div>
-
-        <section class="library-section fangame-updates-section">
-          <div class="section-heading">
-            <div>
-              <div class="section-kicker">TU COLECCIÓN</div>
-              <h2>Actualizaciones de fangames</h2>
-            </div>
-          </div>
-          <div class="placeholder-panel">
-            <div class="placeholder-icon">◇</div>
-            <h2>Tus juegos, al día.</h2>
-            <p>La comprobación de versiones de fangames llegará más adelante. Primero configuraremos las fuentes oficiales de cada proyecto.</p>
-            <button class="secondary-button" onclick={() => navigate('Biblioteca')}>Volver a la biblioteca</button>
-          </div>
-        </section>
-
-      {:else if activeSection === 'Ajustes'}
-        <SettingsView
-          {theme}
-          {systemInfo}
+        <UpdatesView
+          {appVersion}
           {installationInfo}
-          {uninstalling}
-          onSelectTheme={selectTheme}
-          onUninstall={openUninstallDialog}
+          onBack={() => navigate('Biblioteca')}
         />
       {/if}
 
