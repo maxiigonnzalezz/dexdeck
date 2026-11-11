@@ -6,16 +6,22 @@
       deleteCatalogGameVersion,
       getCatalogGameDeletionInfo,
       getVersionSummary,
+      linkLibraryGameToCatalog,
+      listCatalogGameLinks,
       listCatalogGameVersions,
       listCatalogGames,
+      listLinkableLibraryGames,
+      unlinkLibraryGameFromCatalog,
       updateCatalogGame,
       updateCatalogGameVersion,
       type CatalogGame,
       type CatalogGameDeletionInfo,
+      type CatalogGameLink,
       type CatalogGameUpdateInput,
       type CatalogGameType,
       type CatalogGameVersion,
       type CatalogGameVersionInput,
+      type LinkableLibraryGame,
       type VersionSummary
   } from '$lib/encyclopedia';
   import { onMount } from 'svelte';
@@ -54,6 +60,14 @@
     notes: '',
     is_default: false
   });
+  let links = $state<CatalogGameLink[]>([]);
+  let linkableGames = $state<LinkableLibraryGame[]>([]);
+  let showLinkDialog = $state(false);
+  let linkGameId = $state<number | null>(null);
+  let linkVersionId = $state<number | null>(null);
+  let linkError = $state('');
+  let linkSaving = $state(false);
+  let unlinkingGameId = $state<number | null>(null);
 
   let draft = $state({
     name: '',
@@ -79,6 +93,20 @@
 
   let selectedVersion = $derived(
     versions.find((version) => version.id === selectedVersionId) ?? null
+  );
+
+  let selectedLinkableGame = $derived(
+    linkableGames.find((game) => game.id === linkGameId) ?? null
+  );
+
+  let linkMovesExisting = $derived(
+    selectedLinkableGame?.linked_catalog_game_id != null &&
+      selectedLinkableGame.linked_catalog_game_id !== selectedGame?.id
+  );
+
+  let linkUpdatesExisting = $derived(
+    selectedLinkableGame?.linked_catalog_game_id != null &&
+      selectedLinkableGame.linked_catalog_game_id === selectedGame?.id
   );
 
   onMount(() => {
@@ -247,12 +275,18 @@
     showDeleteConfirm = false;
     deleteInfo = null;
     deleteError = '';
+    showLinkDialog = false;
+    linkGameId = null;
+    linkVersionId = null;
+    linkError = '';
+    links = [];
     versions = [];
     selectedVersionId = null;
     summary = null;
 
     try {
       versions = await listCatalogGameVersions(game.id);
+      links = await listCatalogGameLinks(game.id);
       selectedVersionId = versions[0]?.id ?? null;
       await refreshVersionSummary();
     } catch (error) {
@@ -421,6 +455,72 @@
     }
   }
 
+  async function openLinkDialog() {
+    if (!selectedGame) return;
+
+    linkError = '';
+    linkGameId = null;
+    linkVersionId = null;
+    linkSaving = false;
+
+    try {
+      linkableGames = await listLinkableLibraryGames();
+      showLinkDialog = true;
+    } catch (error) {
+      console.error('Error al cargar la biblioteca para vincular:', error);
+      pageError = 'No se ha podido cargar tu biblioteca personal.';
+    }
+  }
+
+  async function submitLink(event: SubmitEvent) {
+    event.preventDefault();
+    if (!selectedGame) return;
+
+    const game = selectedLinkableGame;
+    if (!game) {
+      linkError = 'Elige una entrada de tu biblioteca.';
+      return;
+    }
+
+    linkSaving = true;
+    linkError = '';
+
+    try {
+      await linkLibraryGameToCatalog(
+        selectedGame.id,
+        game.id,
+        linkVersionId,
+        linkMovesExisting
+      );
+      links = await listCatalogGameLinks(selectedGame.id);
+      linkableGames = await listLinkableLibraryGames();
+      showLinkDialog = false;
+    } catch (error) {
+      console.error('Error al vincular la entrada de la biblioteca:', error);
+      linkError = error instanceof Error ? error.message : String(error);
+    } finally {
+      linkSaving = false;
+    }
+  }
+
+  async function unlinkGame(link: CatalogGameLink) {
+    if (!selectedGame) return;
+
+    unlinkingGameId = link.installed_game_id;
+    pageError = '';
+
+    try {
+      await unlinkLibraryGameFromCatalog(selectedGame.id, link.installed_game_id);
+      links = await listCatalogGameLinks(selectedGame.id);
+      linkableGames = await listLinkableLibraryGames();
+    } catch (error) {
+      console.error('Error al desvincular la entrada de la biblioteca:', error);
+      pageError = 'No se ha podido desvincular esta entrada de la biblioteca.';
+    } finally {
+      unlinkingGameId = null;
+    }
+  }
+
   function categoryLabel(type: CatalogGameType): string {
     switch (type) {
       case 'official': return 'Juego oficial';
@@ -456,7 +556,7 @@
 <section class="encyclopedia">
   {#if selectedGame}
     <div class="enc-detail-topline">
-      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; showDeleteConfirm = false; deleteInfo = null; deleteError = ''; }}>
+      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; showDeleteConfirm = false; deleteInfo = null; deleteError = ''; showLinkDialog = false; links = []; }}>
         <span aria-hidden="true">←</span> Volver al catálogo
       </button>
       <span class="enc-kicker">FICHA DE JUEGO</span>
@@ -483,6 +583,37 @@
         <div class="enc-hero-actions">
           <button class="enc-secondary-button" type="button" onclick={openEditForm}>Editar ficha</button>
           <button class="enc-danger-button" type="button" onclick={() => void openDeleteConfirm()}>Eliminar ficha</button>
+        </div>
+
+        <div class="enc-library-block">
+          <div class="enc-library-heading">
+            <span class="enc-kicker">BIBLIOTECA</span>
+            <button class="enc-link-button" type="button" onclick={() => void openLinkDialog()}>Vincular juego</button>
+          </div>
+          {#if links.length > 0}
+            <ul class="enc-library-list">
+              {#each links as link (link.installed_game_id)}
+                <li>
+                  <span>
+                    {link.name}
+                    {#if link.version_label || link.version}
+                      <small>{link.version_label ?? link.version}</small>
+                    {/if}
+                  </span>
+                  <button
+                    class="enc-link-button"
+                    type="button"
+                    disabled={unlinkingGameId === link.installed_game_id}
+                    onclick={() => void unlinkGame(link)}
+                  >
+                    {unlinkingGameId === link.installed_game_id ? 'Desvinculando…' : 'Desvincular'}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="enc-library-empty">Esta ficha no está vinculada a ningún juego de tu biblioteca.</p>
+          {/if}
         </div>
       </div>
     </header>
@@ -731,6 +862,76 @@
     </div>
   {/if}
 
+  {#if showLinkDialog && selectedGame}
+    <div class="enc-modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !linkSaving) showLinkDialog = false; }}>
+      <dialog open class="enc-modal" aria-modal="true" aria-labelledby="enc-link-title">
+        <div class="enc-modal-heading">
+          <div>
+            <span class="enc-kicker">VINCULAR BIBLIOTECA</span>
+            <h2 id="enc-link-title">{selectedGame.name}</h2>
+          </div>
+          <button class="enc-close-button" type="button" aria-label="Cerrar" disabled={linkSaving} onclick={() => showLinkDialog = false}>×</button>
+        </div>
+        <p class="enc-modal-intro">
+          Una entrada de tu biblioteca puede apuntar como mucho a una ficha del catálogo. Vincular no modifica ni mueve los archivos del juego.
+        </p>
+
+        {#if linkableGames.length === 0}
+          <div class="enc-empty-panel compact">
+            <span class="enc-empty-icon">▦</span>
+            <h2>Tu biblioteca está vacía</h2>
+            <p>Añade un juego desde la sección Biblioteca para poder vincularlo con esta ficha.</p>
+          </div>
+        {:else}
+          <form class="enc-form" onsubmit={submitLink}>
+            <label>
+              Entrada de la biblioteca
+              <select bind:value={linkGameId}>
+                <option value={null}>Elige una entrada…</option>
+                {#each linkableGames as game (game.id)}
+                  <option value={game.id}>
+                    {game.name} · {game.version}{#if game.linked_catalog_game_id && game.linked_catalog_game_id !== selectedGame.id} — ya vinculada a {game.linked_catalog_game_name}{/if}
+                  </option>
+                {/each}
+              </select>
+            </label>
+            <label>
+              Versión del catálogo (opcional)
+              <select bind:value={linkVersionId}>
+                <option value={null}>Solo la ficha, sin versión concreta</option>
+                {#each versions as version (version.id)}
+                  <option value={version.id}>{version.version_label} · {platformLabel(version.platform)}</option>
+                {/each}
+              </select>
+            </label>
+
+            {#if linkMovesExisting}
+              <div class="enc-alert" role="alert">
+                «{selectedLinkableGame?.name}» ya está vinculada a «{selectedLinkableGame?.linked_catalog_game_name}».
+                Si continúas, el vínculo se moverá a esta ficha.
+              </div>
+            {/if}
+
+            {#if linkError}<div class="enc-alert" role="alert">{linkError}</div>{/if}
+
+            <div class="enc-form-actions">
+              <button class="enc-secondary-button" type="button" disabled={linkSaving} onclick={() => showLinkDialog = false}>Cancelar</button>
+              <button class="enc-primary-button" type="submit" disabled={linkSaving || linkGameId === null}>
+                {linkSaving
+                  ? 'Vinculando...'
+                  : linkMovesExisting
+                    ? 'Mover vínculo'
+                    : linkUpdatesExisting
+                      ? 'Actualizar vínculo'
+                      : 'Vincular'}
+              </button>
+            </div>
+          </form>
+        {/if}
+      </dialog>
+    </div>
+  {/if}
+
   {#if showVersionManager && selectedGame}
     <div class="enc-modal-backdrop" role="presentation" onclick={(event) => { if (event.target === event.currentTarget && !versionSaving) showVersionManager = false; }}>
       <dialog open class="enc-modal enc-version-modal" aria-modal="true" aria-labelledby="enc-versions-title">
@@ -881,6 +1082,16 @@
   .enc-danger-button:hover:not(:disabled) { transform: translateY(-1px); background: rgba(127, 29, 29, 0.28); }
   .enc-danger-button:disabled { opacity: 0.55; cursor: not-allowed; }
   .enc-hero-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+  .enc-library-block { max-width: 520px; margin-top: 16px; padding: 13px 15px; border: 1px solid var(--enc-border); border-radius: 13px; background: var(--enc-panel); }
+  .enc-library-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .enc-library-list { display: flex; flex-direction: column; gap: 7px; margin: 10px 0 0; padding: 0; list-style: none; }
+  .enc-library-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 7px; border-top: 1px solid var(--enc-border); font-size: 0.84rem; }
+  .enc-library-list li:first-child { padding-top: 0; border-top: 0; }
+  .enc-library-list small { margin-left: 6px; color: var(--enc-muted); font-size: 0.76rem; }
+  .enc-library-empty { margin: 8px 0 0; color: var(--enc-muted); font-size: 0.8rem; line-height: 1.5; }
+  .enc-link-button { padding: 4px 0; border: 0; color: var(--enc-accent); background: none; font: inherit; font-size: 0.78rem; font-weight: 650; cursor: pointer; }
+  .enc-link-button:hover:not(:disabled) { text-decoration: underline; }
+  .enc-link-button:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .enc-filter-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 21px; }
   .enc-filter-row button, .enc-tabs button { border: 1px solid transparent; border-radius: 999px; padding: 9px 13px; color: var(--enc-muted); background: transparent; font: inherit; font-size: 0.82rem; cursor: pointer; }

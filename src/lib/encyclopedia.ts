@@ -294,6 +294,147 @@ export async function deleteCatalogGameVersion(versionId: number): Promise<void>
   await db.execute('DELETE FROM game_versions WHERE id = $1', [versionId]);
 }
 
+export type CatalogGameLink = {
+  installed_game_id: number;
+  name: string;
+  developer: string;
+  version: string;
+  is_hidden: number;
+  catalog_game_version_id: number | null;
+  version_label: string | null;
+  platform: string | null;
+  linked_at: string;
+};
+
+export type LinkableLibraryGame = {
+  id: number;
+  name: string;
+  developer: string;
+  version: string;
+  linked_catalog_game_id: number | null;
+  linked_catalog_game_name: string | null;
+};
+
+export async function listCatalogGameLinks(
+  catalogGameId: number
+): Promise<CatalogGameLink[]> {
+  const db = await getDatabase();
+
+  return db.select<CatalogGameLink[]>(`
+    SELECT
+      l.installed_game_id,
+      g.name,
+      g.developer,
+      g.version,
+      g.is_hidden,
+      l.catalog_game_version_id,
+      gv.version_label,
+      gv.platform,
+      l.linked_at
+    FROM installed_game_catalog_links l
+    JOIN games g ON g.id = l.installed_game_id
+    LEFT JOIN game_versions gv ON gv.id = l.catalog_game_version_id
+    WHERE l.catalog_game_id = $1
+    ORDER BY g.name COLLATE NOCASE ASC
+  `, [catalogGameId]);
+}
+
+export async function listLinkableLibraryGames(): Promise<LinkableLibraryGame[]> {
+  const db = await getDatabase();
+
+  return db.select<LinkableLibraryGame[]>(`
+    SELECT
+      g.id,
+      g.name,
+      g.developer,
+      g.version,
+      l.catalog_game_id AS linked_catalog_game_id,
+      cg.name AS linked_catalog_game_name
+    FROM games g
+    LEFT JOIN installed_game_catalog_links l ON l.installed_game_id = g.id
+    LEFT JOIN catalog_games cg ON cg.id = l.catalog_game_id
+    WHERE g.is_hidden = 0
+    ORDER BY g.name COLLATE NOCASE ASC
+  `);
+}
+
+export async function linkLibraryGameToCatalog(
+  catalogGameId: number,
+  installedGameId: number,
+  catalogGameVersionId: number | null,
+  moveExisting = false
+): Promise<void> {
+  const db = await getDatabase();
+
+  const catalogRows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM catalog_games WHERE id = $1',
+    [catalogGameId]
+  );
+  if ((catalogRows[0]?.total ?? 0) === 0) {
+    throw new Error('La ficha del catálogo no existe.');
+  }
+
+  const gameRows = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM games WHERE id = $1',
+    [installedGameId]
+  );
+  if ((gameRows[0]?.total ?? 0) === 0) {
+    throw new Error('La entrada de la biblioteca no existe.');
+  }
+
+  if (catalogGameVersionId !== null) {
+    const versionRows = await db.select<Array<{ total: number }>>(
+      `SELECT COUNT(*) AS total FROM game_versions
+       WHERE id = $1 AND catalog_game_id = $2`,
+      [catalogGameVersionId, catalogGameId]
+    );
+    if ((versionRows[0]?.total ?? 0) === 0) {
+      throw new Error('La versión seleccionada no pertenece a esta ficha.');
+    }
+  }
+
+  const existingRows = await db.select<Array<{
+    catalog_game_id: number;
+    catalog_game_name: string;
+  }>>(`
+    SELECT l.catalog_game_id, cg.name AS catalog_game_name
+    FROM installed_game_catalog_links l
+    JOIN catalog_games cg ON cg.id = l.catalog_game_id
+    WHERE l.installed_game_id = $1
+  `, [installedGameId]);
+  const existing = existingRows[0];
+
+  if (existing && existing.catalog_game_id !== catalogGameId && !moveExisting) {
+    throw new Error(
+      `Esta entrada ya está vinculada a «${existing.catalog_game_name}». Confirma que quieres mover el vínculo.`
+    );
+  }
+
+  await db.execute(`
+    INSERT INTO installed_game_catalog_links (
+      installed_game_id,
+      catalog_game_id,
+      catalog_game_version_id
+    ) VALUES ($1, $2, $3)
+    ON CONFLICT(installed_game_id) DO UPDATE SET
+      catalog_game_id = excluded.catalog_game_id,
+      catalog_game_version_id = excluded.catalog_game_version_id,
+      linked_at = CURRENT_TIMESTAMP
+  `, [installedGameId, catalogGameId, catalogGameVersionId]);
+}
+
+export async function unlinkLibraryGameFromCatalog(
+  catalogGameId: number,
+  installedGameId: number
+): Promise<void> {
+  const db = await getDatabase();
+
+  await db.execute(`
+    DELETE FROM installed_game_catalog_links
+    WHERE catalog_game_id = $1 AND installed_game_id = $2
+  `, [catalogGameId, installedGameId]);
+}
+
 export async function getVersionSummary(versionId: number): Promise<VersionSummary> {
   const db = await getDatabase();
   const rows = await db.select<VersionSummary[]>(`
