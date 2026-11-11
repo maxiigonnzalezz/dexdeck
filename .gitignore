@@ -11,3 +11,12 @@ vite.config.ts.timestamp-*
 
 # Artefactos de compilación de Tauri
 /src-tauri/target/
+
+# Copias de seguridad locales: no deben formar parte del repositorio
+*.bak
+*.bak.*
+*.backup
+*~
+
+# Estado local de herramientas
+.serena/

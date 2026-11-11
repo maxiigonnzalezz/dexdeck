@@ -453,6 +453,12 @@ This section will be updated as new features are implemented and verified. Compl
 
 ---
 
+## 📄 License
+
+DexDeck is released under the [MIT](LICENSE) license. You can use, modify and redistribute it as long as the copyright notice is kept.
+
+---
+
 <div align="center">
 
 **DexDeck — Your Pokémon universe, connected.**

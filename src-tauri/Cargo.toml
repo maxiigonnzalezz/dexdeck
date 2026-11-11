@@ -1,8 +1,8 @@
 [package]
 name = "dexdeck"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Gestor de biblioteca, enciclopedia y lanzador de fangames y ROM hacks de Pokémon."
+authors = ["Maxi"]
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -14,11 +14,17 @@ edition = "2024"
 name = "dexdeck_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Web inspector dentro de la app compilada. En `tauri dev` ya está disponible
+# por defecto, así que en release queda desactivado salvo que se pida:
+#   pnpm tauri build -- --features devtools
+devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["devtools"] }
+tauri = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

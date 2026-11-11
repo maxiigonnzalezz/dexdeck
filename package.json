@@ -1,7 +1,7 @@
 {
   "name": "dexdeck",
   "version": "0.1.0",
-  "description": "",
+  "description": "Gestor de biblioteca, enciclopedia y lanzador de fangames y ROM hacks de Pokémon.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
