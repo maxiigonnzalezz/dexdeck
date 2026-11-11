@@ -399,6 +399,36 @@ fn get_system_info() -> SystemInfo {
     }
 }
 
+/// Lee un archivo de importación elegido con el diálogo nativo. Se limita el
+/// tamaño y se exige UTF-8 para no cargar binarios gigantes en memoria.
+#[tauri::command]
+fn read_import_file(path: String) -> Result<String, String> {
+    const MAX_IMPORT_BYTES: u64 = 20 * 1024 * 1024;
+    let trimmed = path.trim();
+
+    if trimmed.is_empty() {
+        return Err("No se ha seleccionado ningún archivo.".into());
+    }
+
+    let file_path = PathBuf::from(trimmed);
+    let metadata = std::fs::metadata(&file_path)
+        .map_err(|error| format!("No se ha podido leer el archivo: {error}"))?;
+
+    if !metadata.is_file() {
+        return Err("La ruta seleccionada no es un archivo.".into());
+    }
+
+    if metadata.len() > MAX_IMPORT_BYTES {
+        return Err("El archivo supera los 20 MB; divídelo en partes más pequeñas.".into());
+    }
+
+    let bytes = std::fs::read(&file_path)
+        .map_err(|error| format!("No se ha podido leer el archivo: {error}"))?;
+
+    String::from_utf8(bytes)
+        .map_err(|_| "El archivo no está codificado en UTF-8. Guárdalo con esa codificación y vuelve a intentarlo.".to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let migrations = vec![
@@ -535,6 +565,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             launch_game,
+            read_import_file,
             get_system_info,
             executable_metadata::inspect_game_executable,
             get_wallpaper_snapshot,

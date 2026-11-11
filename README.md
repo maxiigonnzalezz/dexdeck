@@ -77,7 +77,7 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 | Versiones de juegos | ✅ Funcional | Varias versiones por ficha, edición, borrado y versión predeterminada |
 | Fuentes y atribución | ✅ Implementadas | Registro de fuentes y atribución por ficha y versión |
 | Vínculos con la biblioteca | ✅ Implementados | Vincular, desvincular y mover entradas de la biblioteca |
-| Pokédex por versión | 🚧 En desarrollo | Alta, edición y borrado manual; formas por número, tipos, habilidades y estadísticas. Falta importación y número nacional |
+| Pokédex por versión | 🚧 En desarrollo | Alta, edición y borrado manual, más importación CSV/JSON con vista previa. Falta número nacional y fuentes remotas |
 | Regiones y ubicaciones | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Encuentros y objetos | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Mapas y guías | 🗺️ Estructura preparada | Modelo de datos; falta editor y visor funcional |
@@ -155,7 +155,7 @@ La primera versión incluye:
 - Pokédex por versión con alta, edición y borrado manual de entradas, formas con el mismo número, tipos, habilidades, estadísticas y descripción.
 - Pestañas de Resumen, Pokédex, Mundo y Guías; Mundo y Guías siguen en fase inicial.
 
-Las entradas de la Pokédex se crean a mano por ahora: todavía no hay importación de datos ni número nacional. Las secciones de Mundo y Guías muestran estados iniciales de la interfaz.
+Las entradas de la Pokédex se pueden crear a mano o importar desde CSV/JSON con vista previa antes de aplicar. Todavía no hay recolección automática desde fuentes remotas ni número nacional. Las secciones de Mundo y Guías muestran estados iniciales de la interfaz.
 
 ---
 
@@ -272,7 +272,7 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 - [ ] Movimientos y métodos de aprendizaje.
 - [x] Disponibilidad por versión mediante la marca de obtenible.
 - [ ] Gestión de Fakémon y especies personalizadas.
-- [ ] Herramientas para importar y revisar datos.
+- [x] Herramientas para importar y revisar datos. _(CSV/JSON local para la Pokédex)_
 
 **Criterio de finalización:** una versión puede tener una Pokédex completa, independiente de otras versiones del mismo juego.
 
@@ -315,7 +315,7 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 ### Fase 7 — Fuentes, importación y sincronización
 
 - [ ] Integración con fuentes de datos oficiales y comunitarias.
-- [ ] Importación desde formatos estructurados.
+- [x] Importación desde formatos estructurados. _(CSV y JSON locales; fuentes remotas pendientes)_
 - [ ] Validación y detección de duplicados.
 - [ ] Atribución visible y conservación de licencias.
 - [ ] Caché local de datos e imágenes.
@@ -405,6 +405,27 @@ DexDeck podrá combinar datos de APIs, fuentes oficiales, documentación comunit
 
 PokéAPI puede servir como fuente para parte de los datos de juegos oficiales, pero no cubre por sí sola el contenido particular de los fangames y ROM hacks. Los datos personalizados necesitarán herramientas de edición e importación propias.
 
+### Importación CSV/JSON
+
+La Pokédex de cada versión acepta archivos `.csv` y `.json` desde el botón **Importar CSV/JSON**. Antes de escribir nada se muestra un resumen con las filas nuevas, las que se actualizarían, las que no cambian y los errores, y se puede elegir entre añadir y actualizar o solo añadir. Nada se borra nunca.
+
+Columnas admitidas (en español o inglés, sin distinguir mayúsculas ni acentos):
+
+| Columna | Contenido |
+|---|---|
+| `numero` | Número local de la Pokédex, obligatorio |
+| `nombre` | Nombre del Pokémon, obligatorio |
+| `forma` | Forma o variante; dos formas pueden compartir número |
+| `tipo_primario`, `tipo_secundario` | Tipo en inglés (`electric`) o en español (`Eléctrico`) |
+| `habilidades` | Varias habilidades separadas por `\|` |
+| `ps`, `ataque`, `defensa`, `atq_esp`, `def_esp`, `velocidad` | Estadísticas base; si faltan se avisa y se guardan como 0 |
+| `descripcion` | Texto de la Pokédex |
+| `sprite_url`, `sprite_path` | URL web y ruta local del sprite |
+| `obtenible` | `si`/`no`, `true`/`false` o `1`/`0` |
+| `fuente` | `source_key` o nombre de una fuente registrada |
+
+El JSON admite una lista de Pokémon o un paquete con la clave `pokemon`, tipos como `types: ["grass", "poison"]` y estadísticas agrupadas en `stats` o `base_stats`. Cada fila se clasifica como nueva, actualizada o sin cambios comparando número y forma contra lo que ya existe.
+
 DexDeck no debe distribuir ROMs comerciales, BIOS, firmware ni archivos protegidos de terceros. El usuario debe aportar sus propios archivos y cumplir la legislación aplicable. La aplicación es un proyecto de fans independiente y no está afiliada, respaldada ni patrocinada por Nintendo, The Pokémon Company o Game Freak.
 
 ---
@@ -440,6 +461,17 @@ Estas ideas no forman parte del alcance implementado; son posibilidades que enca
 ## 🗓️ Registro de progreso
 
 Este apartado se actualizará conforme se implementen y verifiquen nuevas funciones. Se registrarán por separado los cambios terminados, los que están en curso y las validaciones pendientes.
+
+### 11 de noviembre de 2026 — Importación CSV/JSON de la Pokédex
+
+- ✅ Lector CSV propio (RFC 4180) con BOM, comillas escapadas, saltos de línea y detección de coma o punto y coma.
+- ✅ Vista previa antes de aplicar: filas nuevas, actualizaciones, sin cambios y errores, con avisos por línea.
+- ✅ Dos modos de aplicación: añadir y actualizar, o solo añadir; nunca se borra nada.
+- ✅ Avisos de columnas desalineadas, estadísticas incompletas, tipos desconocidos, sprites inválidos y fuentes no registradas.
+- ✅ Paquetes JSON con `pokemon`, `types`, `stats`/`base_stats` y metadatos de juego y versión.
+- ✅ Lectura de archivos con un comando propio (`read_import_file`), limitada a 20 MB y solo UTF-8.
+- 🧪 Comprobado en la app real: CSV con tres entradas, reimportación idempotente (3 sin cambios) y paquete JSON con una nueva, una actualización y una sin cambios.
+- 🧪 `pnpm check` (0 errores, 0 avisos), `pnpm build` y `cargo test` (8 pruebas) correctos.
 
 ### 11 de noviembre de 2026 — Arranque de la Fase 3: Pokédex por versión
 

@@ -13,6 +13,7 @@
     type PokemonType
   } from '$lib/pokedex';
   import { listDataSources, type DataSource } from '$lib/encyclopedia';
+  import PokedexImport from '$lib/components/PokedexImport.svelte';
   import { isWebUrl } from '$lib/url';
 
   type Props = {
@@ -239,7 +240,16 @@
       <h2>{gameName} <span>· {versionLabel}</span></h2>
       <p>Entradas propias de esta versión. Las formas comparten número y se distinguen por su nombre de forma.</p>
     </div>
-    <button type="button" class="pdx-primary" onclick={openCreate}>＋ Añadir Pokémon</button>
+    <div class="pdx-header-actions">
+      <PokedexImport
+        {versionId}
+        {gameName}
+        {versionLabel}
+        {sources}
+        onImported={() => { void load(); onChanged?.(); }}
+      />
+      <button type="button" class="pdx-primary" onclick={openCreate}>＋ Añadir Pokémon</button>
+    </div>
   </header>
 
   <div class="pdx-toolbar">
@@ -507,6 +517,13 @@
     margin: 0;
     font-size: 1.35rem;
     line-height: 1.2;
+  }
+
+  .pdx-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
   }
 
   .pdx-header h2 span {
