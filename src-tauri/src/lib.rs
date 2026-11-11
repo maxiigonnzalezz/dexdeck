@@ -157,6 +157,22 @@ fn encode_wallpaper_data_url(mime: &str, bytes: &[u8]) -> String {
 }
 
 #[cfg(target_os = "linux")]
+fn read_still_wallpaper(path: &std::path::Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let mime = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if bytes.starts_with(b"BM") {
+        "image/bmp"
+    } else {
+        return None;
+    };
+
+    Some(encode_wallpaper_data_url(mime, &bytes))
+}
+
+#[cfg(target_os = "linux")]
 fn detect_mpvpaper_source() -> Option<(std::path::PathBuf, f64)> {
     use std::fs;
     use std::path::PathBuf;
@@ -252,14 +268,16 @@ fn get_wallpaper_snapshot() -> Result<Option<String>, String> {
         .arg(&wallpaper_path)
         .output();
     let Ok(probe) = probe else {
-        return Ok(None);
+        return Ok(read_still_wallpaper(&wallpaper_path));
     };
     if !probe.status.success() {
-        return Ok(None);
+        return Ok(read_still_wallpaper(&wallpaper_path));
     }
     let duration: f64 = String::from_utf8_lossy(&probe.stdout).trim().parse().unwrap_or(0.0);
+    // A still image has no meaningful duration: return the file itself so the
+    // glass substrate shows the wallpaper without any conversion.
     if !duration.is_finite() || duration <= 0.0 {
-        return Ok(None);
+        return Ok(read_still_wallpaper(&wallpaper_path));
     }
 
     let position = elapsed % duration;
@@ -278,10 +296,10 @@ fn get_wallpaper_snapshot() -> Result<Option<String>, String> {
         ])
         .output();
     let Ok(frame) = frame else {
-        return Ok(None);
+        return Ok(read_still_wallpaper(&wallpaper_path));
     };
     if !frame.status.success() || frame.stdout.is_empty() {
-        return Ok(None);
+        return Ok(read_still_wallpaper(&wallpaper_path));
     }
 
     Ok(Some(encode_wallpaper_data_url("image/jpeg", &frame.stdout)))

@@ -87,8 +87,7 @@
   let uninstallDialog: HTMLDialogElement | undefined = $state(undefined);
   let uninstallChoice = $state<'keep' | 'delete'>('keep');
   let uninstalling = $state(false);
-  let wallpaperRefreshTimer: number | undefined;
-  let wallpaperRefreshInFlight = false;
+  let wallpaperSnapshotInFlight = false;
   let wallpaperSnapshotWarningShown = false;
   let detachLogConsole: (() => void) | undefined;
 
@@ -119,7 +118,6 @@
     void loadMaintenanceInfo();
     return () => {
       detachLogConsole?.();
-      stopWallpaperRefresh();
     };
   });
 
@@ -136,22 +134,25 @@
     }
 
     if (nextTheme === 'glass') {
-      startWallpaperRefresh();
+      void loadWallpaperSnapshot();
     } else {
-      stopWallpaperRefresh();
       document.documentElement.style.removeProperty('--dd-wallpaper-image');
     }
   }
 
 
-  // Wallpaper-backed Liquid Glass. The native command returns an image made
-  // from the wallpaper source, not from the desktop/window compositor.
+  // Wallpaper-backed Liquid Glass. The native command returns a single still
+  // image made from the wallpaper source, never a screenshot of the desktop or
+  // the windows behind DexDeck. Animated wallpapers are captured as one frame
+  // and stay still, so the background does not repaint continuously.
 
-  async function refreshWallpaperSnapshot() {
-    if (theme !== 'glass' || wallpaperRefreshInFlight) return;
-    wallpaperRefreshInFlight = true;
+  async function loadWallpaperSnapshot() {
+    if (theme !== 'glass' || wallpaperSnapshotInFlight) return;
+    wallpaperSnapshotInFlight = true;
     try {
       const imageData = await invoke<string | null>('get_wallpaper_snapshot');
+      // The user may have changed the theme while the snapshot was loading.
+      if (theme !== 'glass') return;
       if (imageData) {
         document.documentElement.style.setProperty(
           '--dd-wallpaper-image',
@@ -166,25 +167,8 @@
         wallpaperSnapshotWarningShown = true;
       }
     } finally {
-      wallpaperRefreshInFlight = false;
+      wallpaperSnapshotInFlight = false;
     }
-  }
-
-  function stopWallpaperRefresh() {
-    if (wallpaperRefreshTimer !== undefined) {
-      window.clearInterval(wallpaperRefreshTimer);
-      wallpaperRefreshTimer = undefined;
-    }
-  }
-
-  function startWallpaperRefresh() {
-    stopWallpaperRefresh();
-    void refreshWallpaperSnapshot();
-    // mpvpaper is a video wallpaper, so refresh the source frame periodically.
-    const refreshInterval = systemInfo?.os === 'linux' ? 1200 : 15000;
-    wallpaperRefreshTimer = window.setInterval(() => {
-      void refreshWallpaperSnapshot();
-    }, refreshInterval);
   }
 
 
@@ -224,7 +208,6 @@
   async function loadSystemInfo() {
     try {
       systemInfo = await invoke<SystemInfo>('get_system_info');
-      if (theme === 'glass') startWallpaperRefresh();
     } catch (error) {
       console.warn('No se pudo detectar el sistema operativo:', error);
       systemInfo = { os: 'unknown', osName: 'Desconocido', architecture: 'Desconocida' };
