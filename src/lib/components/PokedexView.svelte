@@ -14,6 +14,7 @@
   } from '$lib/pokedex';
   import { listDataSources, type DataSource } from '$lib/encyclopedia';
   import PokedexImport from '$lib/components/PokedexImport.svelte';
+  import PokedexRemote from '$lib/components/PokedexRemote.svelte';
   import { isWebUrl } from '$lib/url';
 
   type Props = {
@@ -241,6 +242,13 @@
       <p>Entradas propias de esta versión. Las formas comparten número y se distinguen por su nombre de forma.</p>
     </div>
     <div class="pdx-header-actions">
+      <PokedexRemote
+        {versionId}
+        {gameName}
+        {versionLabel}
+        {sources}
+        onImported={() => { void load(); onChanged?.(); }}
+      />
       <PokedexImport
         {versionId}
         {gameName}
