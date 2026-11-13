@@ -203,6 +203,7 @@
   aria-labelledby="pdr-title"
   onclick={(event) => { if (event.target === dialog) closeDialog(); }}
   onkeydown={(event) => { if (event.key === 'Escape') closeDialog(); }}
+  oncancel={(event) => { if (downloading || applying) event.preventDefault(); }}
 >
   <div class="pdr-body">
     <header class="pdr-head">

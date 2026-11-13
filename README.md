@@ -77,7 +77,7 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 | Versiones de juegos | ✅ Funcional | Varias versiones por ficha, edición, borrado y versión predeterminada |
 | Fuentes y atribución | ✅ Implementadas | Registro de fuentes y atribución por ficha y versión |
 | Vínculos con la biblioteca | ✅ Implementados | Vincular, desvincular y mover entradas de la biblioteca |
-| Pokédex por versión | 🚧 En desarrollo | Alta, edición y borrado manual, más importación CSV/JSON con vista previa. Falta número nacional y fuentes remotas |
+| Pokédex por versión | ✅ Funcional | Alta, edición y borrado manual, importación CSV/JSON y recolección desde PokéAPI con vista previa y atribución |
 | Regiones y ubicaciones | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Encuentros y objetos | 🗺️ Estructura preparada | Modelo de datos; falta interfaz y contenido |
 | Mapas y guías | 🗺️ Estructura preparada | Modelo de datos; falta editor y visor funcional |
@@ -89,7 +89,8 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 
 ### Última comprobación conocida
 
-- `pnpm check`: **0 errores y 0 advertencias** después de corregir la estructura de `Encyclopedia.svelte`.
+- `pnpm check`: **0 errores y 0 advertencias** después de la recolección desde PokéAPI.
+- `pnpm test:import`: **20 pruebas** de las piezas puras de importación y red.
 - Esa comprobación fue anterior a la validación final del paquete visual Liquid Glass v2. Hay que volver a ejecutarla después de instalar cualquier actualización de estilos.
 - No se considera terminada una función solo porque exista su tabla, su tipo TypeScript o una pestaña visual: también debe disponer de operaciones, interfaz y pruebas suficientes.
 
@@ -155,7 +156,7 @@ La primera versión incluye:
 - Pokédex por versión con alta, edición y borrado manual de entradas, formas con el mismo número, tipos, habilidades, estadísticas y descripción.
 - Pestañas de Resumen, Pokédex, Mundo y Guías; Mundo y Guías siguen en fase inicial.
 
-Las entradas de la Pokédex se pueden crear a mano o importar desde CSV/JSON con vista previa antes de aplicar. Todavía no hay recolección automática desde fuentes remotas ni número nacional. Las secciones de Mundo y Guías muestran estados iniciales de la interfaz.
+Las entradas de la Pokédex se pueden crear a mano, importar desde CSV/JSON o recolectar desde PokéAPI con vista previa antes de aplicar. Las filas importadas guardan `source_url`, clave de especie y número nacional. Las secciones de Mundo y Guías muestran estados iniciales de la interfaz.
 
 ---
 
@@ -314,10 +315,10 @@ La hoja de ruta está ordenada por dependencias. Primero se consolida el modelo 
 
 ### Fase 7 — Fuentes, importación y sincronización
 
-- [ ] Integración con fuentes de datos oficiales y comunitarias.
-- [x] Importación desde formatos estructurados. _(CSV y JSON locales; fuentes remotas pendientes)_
-- [ ] Validación y detección de duplicados.
-- [ ] Atribución visible y conservación de licencias.
+- [x] Integración con fuentes de datos oficiales y comunitarias. _(PokéAPI para la Pokédex; MediaWiki queda para el siguiente corte)_
+- [x] Importación desde formatos estructurados. _(CSV, JSON y recolección directa desde PokéAPI)_
+- [x] Validación y detección de duplicados.
+- [x] Atribución visible y conservación de licencias.
 - [ ] Caché local de datos e imágenes.
 - [ ] Sincronización incremental cuando exista conexión.
 - [ ] Resolución de conflictos y errores de sincronización.
@@ -423,8 +424,24 @@ Columnas admitidas (en español o inglés, sin distinguir mayúsculas ni acentos
 | `sprite_url`, `sprite_path` | URL web y ruta local del sprite |
 | `obtenible` | `si`/`no`, `true`/`false` o `1`/`0` |
 | `fuente` | `source_key` o nombre de una fuente registrada |
+| `source_url` | URL exacta del recurso del que salió la fila |
+| `species_key` | Clave canónica de la especie, por ejemplo `pokeapi:pikachu` |
+| `national_dex_number` | Número nacional de la especie, entre 1 y 9999 |
 
 El JSON admite una lista de Pokémon o un paquete con la clave `pokemon`, tipos como `types: ["grass", "poison"]` y estadísticas agrupadas en `stats` o `base_stats`. Cada fila se clasifica como nueva, actualizada o sin cambios comparando número y forma contra lo que ya existe.
+
+### Recolección desde PokéAPI
+
+El botón **Recolectar de PokéAPI** de la Pokédex descarga una Pokédex completa (Kanto, Johto, Hoenn y el resto de la lista de PokéAPI) y la pasa por la misma vista previa que la importación de archivos. Nada se escribe en la base hasta pulsar **Importar**.
+
+- Descarga nombres, tipos, habilidades traducidas, estadísticas base, descripción y URL del artwork oficial; las imágenes no se descargan, solo se guarda su dirección.
+- Los textos se toman en español y, si una especie no tiene traducción, se usa el inglés; la vista previa acumula esos avisos.
+- El límite de entradas es opcional: vacío o `0` descarga la Pokédex entera y un número mayor descarga solo las primeras entradas.
+- La descarga se puede cancelar en cualquier momento y, si se cancela, no se guarda nada.
+- Cada fila guarda el Pokémon de origen, la URL exacta de la especie (`source_url`), la clave `pokeapi:<especie>` y el número nacional.
+- Se recuerda la última Pokédex remota usada por versión para proponerla la próxima vez.
+
+La aplicación solo puede llamar a `pokeapi.co`, `*.fandom.com` y `bulbapedia.bulbagarden.net`; el resto de dominios queda bloqueado por la lista blanca de Tauri. Los datos servidos por PokéAPI pertenecen a The Pokémon Company; el código de PokéAPI se distribuye bajo BSD-3-Clause.
 
 DexDeck no debe distribuir ROMs comerciales, BIOS, firmware ni archivos protegidos de terceros. El usuario debe aportar sus propios archivos y cumplir la legislación aplicable. La aplicación es un proyecto de fans independiente y no está afiliada, respaldada ni patrocinada por Nintendo, The Pokémon Company o Game Freak.
 
@@ -461,6 +478,17 @@ Estas ideas no forman parte del alcance implementado; son posibilidades que enca
 ## 🗓️ Registro de progreso
 
 Este apartado se actualizará conforme se implementen y verifiquen nuevas funciones. Se registrarán por separado los cambios terminados, los que están en curso y las validaciones pendientes.
+
+### 13 de noviembre de 2026 — Recolección desde PokéAPI
+
+- ✅ Migración 13: fuentes semilla `pokeapi`, `fandom` y `bulbapedia`, columna `source_url` en `game_pokemon` y Pokédex remota recordada por versión.
+- ✅ Plugin HTTP de Tauri con lista blanca limitada a `pokeapi.co`, `*.fandom.com` y `bulbapedia.bulbagarden.net`.
+- ✅ Adaptador `src/lib/import/pokeapi.ts`: especies, formas, tipos, habilidades, estadísticas base, descripción y artwork; textos en español con aviso cuando se usa el inglés.
+- ✅ Diálogo **Recolectar de PokéAPI** con sugerencia de Pokédex, límite opcional, progreso, cancelación y la misma vista previa que la importación de archivos.
+- ✅ Cada fila importada guarda fuente, `source_url`, `species_key` y número nacional, y la atribución queda visible en el diálogo.
+- 🧪 Comprobado en la app real: Kanto con límite 15 importó 15 entradas con sprites y etiqueta «PokéAPI»; la segunda descarga dio 15 sin cambios y el botón de importar quedó deshabilitado.
+- 🧪 Cancelación real: con Kanto completo en curso, «Cancelar descarga» mostró «Descarga cancelada; no se ha guardado nada», la vista previa no apareció y la base siguió con 15 filas. Escape no cierra el diálogo mientras descarga.
+- 🧪 `pnpm check` (0 errores, 0 avisos), `pnpm build`, `cargo test` (8 pruebas) y `pnpm test:import` (20 pruebas) correctos.
 
 ### 11 de noviembre de 2026 — Importación CSV/JSON de la Pokédex
 
