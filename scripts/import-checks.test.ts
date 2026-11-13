@@ -298,3 +298,32 @@ test('el límite cero importa todo', async () => {
 
   assert.equal(result.records.length, 1);
 });
+
+import { createFetchJson } from '$lib/import/http-client';
+
+test('reintenta un 429 y termina bien', async () => {
+  let calls = 0;
+  const request = async () => {
+    calls += 1;
+    if (calls === 1) {
+      return { ok: false, status: 429, headers: { get: () => '0' }, json: async () => ({}) };
+    }
+    return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ ok: true }) };
+  };
+
+  const fetchJson = createFetchJson(request, 50);
+  assert.deepEqual(await fetchJson('https://pokeapi.co/api/v2/pokemon/1'), { ok: true });
+  assert.equal(calls, 2);
+});
+
+test('tras tres fallos lanza un mensaje en español', async () => {
+  const request = async () => ({
+    ok: false,
+    status: 500,
+    headers: { get: () => null },
+    json: async () => ({})
+  });
+
+  const fetchJson = createFetchJson(request, 50);
+  await assert.rejects(fetchJson('https://pokeapi.co/x'), /No se ha podido consultar/);
+});

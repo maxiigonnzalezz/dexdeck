@@ -15,6 +15,20 @@
     "process:default",
     "log:default",
     {
+      "identifier": "http:default",
+      "allow": [
+        {
+          "url": "https://pokeapi.co/*"
+        },
+        {
+          "url": "https://*.fandom.com/*"
+        },
+        {
+          "url": "https://bulbapedia.bulbagarden.net/*"
+        }
+      ]
+    },
+    {
       "identifier": "opener:allow-open-url",
       "allow": [
         {
