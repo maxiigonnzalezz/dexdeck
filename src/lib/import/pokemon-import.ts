@@ -50,7 +50,7 @@ export type ImportApplyResult = {
   failures: ImportFailure[];
 };
 
-type RawRecord = Record<string, string>;
+export type RawRecord = Record<string, string>;
 
 const HEADER_ALIASES: Record<string, string[]> = {
   dex_number: ['numero', 'numero_local', 'numero_pokedex', 'number', 'dex_number', 'n'],
@@ -397,7 +397,7 @@ function buildInput(
   };
 }
 
-type ParsedRow = {
+export type ParsedRow = {
   line: number;
   record: RawRecord;
   columns?: { expected: number; found: number };

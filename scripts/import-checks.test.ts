@@ -91,3 +91,210 @@ test('una clave de especie inválida es un error de fila', () => {
   const preview = parsePokemonFile(csv, 'x.csv', [], []);
   assert.equal(preview.counts.errors, 1);
 });
+
+import {
+  cleanFlavorText,
+  collectPokedex,
+  parsePokedexEntries,
+  parsePokedexOptions,
+  pickFlavorText,
+  pickLocalizedName,
+  prettyName,
+  suggestPokedexKey,
+  toRawRecord
+} from '$lib/import/pokeapi';
+
+test('sugiere la Pokedex por nombre de juego', () => {
+  assert.equal(suggestPokedexKey('Pokémon Rojo Fuego', ''), 'kanto');
+  assert.equal(suggestPokedexKey('Pokemon Esmeralda', '3.0'), 'hoenn');
+  assert.equal(suggestPokedexKey('Pokemon Insurgence', '1.2'), '');
+});
+
+test('lee las entradas de la Pokedex', () => {
+  assert.deepEqual(
+    parsePokedexEntries({
+      pokemon_entries: [
+        {
+          entry_number: 1,
+          pokemon_species: { name: 'bulbasaur', url: 'https://pokeapi.co/api/v2/pokemon-species/1/' }
+        }
+      ]
+    }),
+    [{ entryNumber: 1, speciesKey: 'bulbasaur', speciesUrl: 'https://pokeapi.co/api/v2/pokemon-species/1/' }]
+  );
+});
+
+test('elige la descripción en español', () => {
+  assert.deepEqual(
+    pickFlavorText([
+      { flavor_text: 'A', language: { name: 'en' } },
+      { flavor_text: 'B', language: { name: 'es' } }
+    ]),
+    { value: 'B', language: 'es' }
+  );
+});
+
+test('convierte la lista de Pokedex en opciones ordenadas', () => {
+  const options = parsePokedexOptions({
+    results: [
+      { name: 'hoenn', url: 'h' },
+      { name: 'kanto', url: 'k' },
+      { name: 'rara', url: 'r' }
+    ]
+  });
+
+  assert.deepEqual(options.map((option) => option.key), ['kanto', 'hoenn', 'rara']);
+  assert.equal(options[0].label, 'Kanto');
+});
+
+test('prefiere español y cae al inglés', () => {
+  const names = [
+    { name: 'Pikachu', language: { name: 'en' } },
+    { name: 'Pikachu', language: { name: 'es' } }
+  ];
+
+  assert.deepEqual(pickLocalizedName(names), { value: 'Pikachu', language: 'es' });
+  assert.deepEqual(pickLocalizedName([names[0]]), { value: 'Pikachu', language: 'en' });
+  assert.equal(pickLocalizedName([]), null);
+});
+
+test('limpia saltos y caracteres de control', () => {
+  assert.equal(cleanFlavorText('Duerme\n\fen el suelo.'), 'Duerme en el suelo.');
+});
+
+test('humaniza los slugs de la API', () => {
+  assert.equal(prettyName('mr-mime'), 'Mr Mime');
+  assert.equal(prettyName('nidoran-f'), 'Nidoran F');
+  assert.equal(prettyName('pikachu'), 'Pikachu');
+});
+
+test('prefiere el artwork oficial y cae a front_default', () => {
+  const base = {
+    entryNumber: 25,
+    speciesKey: 'pikachu',
+    nationalNumber: 25,
+    abilities: new Map<string, string>(),
+    species: {},
+    pokemon: {
+      id: 25,
+      sprites: { front_default: 'front.png', other: { 'official-artwork': { front_default: 'art.png' } } }
+    }
+  };
+
+  assert.equal(toRawRecord(base).sprite_url, 'art.png');
+  assert.equal(
+    toRawRecord({ ...base, pokemon: { id: 25, sprites: { front_default: 'front.png' } } }).sprite_url,
+    'front.png'
+  );
+  assert.equal(toRawRecord({ ...base, pokemon: { id: 25, sprites: {} } }).sprite_url, '');
+});
+
+test('mapea tipos, stats, habilidades y sprite', () => {
+  const record = toRawRecord({
+    entryNumber: 25,
+    speciesKey: 'pikachu',
+    nationalNumber: 25,
+    abilities: new Map([['static', 'Electrostática']]),
+    species: {
+      names: [{ name: 'Pikachu', language: { name: 'es' } }],
+      flavor_text_entries: [{ flavor_text: 'Roe\fcosas.', language: { name: 'es' } }]
+    },
+    pokemon: {
+      id: 25,
+      types: [
+        { slot: 2, type: { name: 'fairy' } },
+        { slot: 1, type: { name: 'electric' } }
+      ],
+      abilities: [{ ability: { name: 'static' } }],
+      stats: [
+        { base_stat: 35, stat: { name: 'hp' } },
+        { base_stat: 55, stat: { name: 'attack' } },
+        { base_stat: 40, stat: { name: 'defense' } },
+        { base_stat: 50, stat: { name: 'special-attack' } },
+        { base_stat: 50, stat: { name: 'special-defense' } },
+        { base_stat: 90, stat: { name: 'speed' } }
+      ],
+      sprites: { front_default: 'front.png' }
+    }
+  });
+
+  assert.equal(record.type_primary, 'electric');
+  assert.equal(record.type_secondary, 'fairy');
+  assert.equal(record.abilities, 'Electrostática');
+  assert.equal(record.sprite_url, 'front.png');
+  assert.equal(record.national_dex_number, '25');
+  assert.equal(record.species_key, 'pokeapi:pikachu');
+  assert.equal(record.dex_entry, 'Roe cosas.');
+});
+
+test('recolecta con fetch inyectado, ordena y avisa de fallos', async () => {
+  const calls: string[] = [];
+  const fakeFetch = async (url: string) => {
+    calls.push(url);
+
+    if (url.endsWith('/pokedex/kanto')) {
+      return {
+        pokemon_entries: [
+          {
+            entry_number: 2,
+            pokemon_species: { name: 'ivysaur', url: 'https://pokeapi.co/api/v2/pokemon-species/2/' }
+          },
+          {
+            entry_number: 1,
+            pokemon_species: { name: 'bulbasaur', url: 'https://pokeapi.co/api/v2/pokemon-species/1/' }
+          }
+        ]
+      };
+    }
+
+    if (url.includes('/pokemon-species/1/')) throw new Error('404');
+
+    return {
+      id: 2,
+      names: [{ name: 'Ivysaur', language: { name: 'es' } }],
+      flavor_text_entries: [],
+      varieties: [],
+      types: [{ slot: 1, type: { name: 'grass' } }],
+      abilities: [],
+      stats: [],
+      sprites: { front_default: null }
+    };
+  };
+
+  const result = await collectPokedex({ pokedexKey: 'kanto', fetchJson: fakeFetch });
+
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].record.dex_number, '2');
+  assert.equal(result.issues.length, 1);
+  assert.equal(result.cancelled, false);
+  assert.ok(calls.length >= 3);
+});
+
+test('el límite cero importa todo', async () => {
+  const result = await collectPokedex({
+    pokedexKey: 'kanto',
+    maxEntries: 0,
+    fetchJson: async (url) => {
+      if (url.endsWith('/pokedex/kanto')) {
+        return {
+          pokemon_entries: [
+            { entry_number: 1, pokemon_species: { name: 'bulbasaur', url: 's/1/' } }
+          ]
+        };
+      }
+
+      return {
+        id: 1,
+        names: [],
+        flavor_text_entries: [],
+        varieties: [],
+        types: [],
+        abilities: [],
+        stats: [],
+        sprites: {}
+      };
+    }
+  });
+
+  assert.equal(result.records.length, 1);
+});
