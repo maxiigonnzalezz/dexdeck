@@ -773,3 +773,38 @@ export async function deleteCatalogGame(
 
   return info;
 }
+
+/** Pokédex remota recordada para una versión, o cadena vacía si no hay. */
+export async function getVersionRemotePokedex(versionId: number): Promise<string> {
+  const db = await getDatabase();
+
+  if (!Number.isSafeInteger(versionId) || versionId <= 0) {
+    throw new Error('La versión seleccionada no es válida.');
+  }
+
+  const rows = await db.select<Array<{ remote_pokedex_key: string }>>(
+    'SELECT remote_pokedex_key FROM game_versions WHERE id = $1',
+    [versionId]
+  );
+
+  return rows[0]?.remote_pokedex_key ?? '';
+}
+
+/** Guarda qué Pokédex remota se usó, para repetir la recolección sin elegir. */
+export async function setVersionRemotePokedex(versionId: number, key: string): Promise<void> {
+  const db = await getDatabase();
+  const cleaned = key.trim().toLowerCase();
+
+  if (!/^[a-z0-9-]{1,60}$/.test(cleaned)) {
+    throw new Error('La Pokédex remota no es válida.');
+  }
+
+  const result = await db.execute(
+    'UPDATE game_versions SET remote_pokedex_key = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+    [cleaned, versionId]
+  );
+
+  if (result.rowsAffected === 0) {
+    throw new Error('La versión ya no existe.');
+  }
+}

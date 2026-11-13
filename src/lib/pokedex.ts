@@ -109,6 +109,9 @@ export type GamePokemon = {
   source_name: string | null;
   source_attribution: string | null;
   source_license: string | null;
+  source_url: string;
+  species_key: string | null;
+  national_dex_number: number | null;
 };
 
 export type GamePokemonInput = {
@@ -124,6 +127,9 @@ export type GamePokemonInput = {
   sprite_path: string;
   is_obtainable: boolean;
   source_id: number | null;
+  source_url?: string;
+  species_key?: string;
+  national_dex_number?: number | null;
 };
 
 type GamePokemonRow = Omit<GamePokemon, 'abilities' | 'base_stats' | 'is_obtainable'> & {
@@ -213,6 +219,76 @@ async function validateSourceId(db: Database, sourceId: number | null): Promise<
   return sourceId;
 }
 
+/**
+ * Enlaza la entrada con su especie canónica. Devuelve `undefined` cuando la
+ * fila no trae clave de especie: en ese caso un UPDATE no debe borrar un
+ * vínculo que ya existía.
+ */
+async function resolveSpeciesId(
+  db: Database,
+  input: GamePokemonInput,
+  sourceId: number | null
+): Promise<number | null | undefined> {
+  const speciesKey = (input.species_key ?? '').trim().toLowerCase();
+
+  if (speciesKey === '') return undefined;
+
+  if (!/^[a-z0-9][a-z0-9:_-]{0,79}$/.test(speciesKey)) {
+    throw new Error('La clave de especie no es válida.');
+  }
+
+  const national = input.national_dex_number ?? null;
+
+  if (national !== null && (!Number.isSafeInteger(national) || national <= 0 || national > 9999)) {
+    throw new Error('El número nacional debe estar entre 1 y 9999.');
+  }
+
+  const byKey = await db.select<Array<{ id: number; national_dex_number: number | null }>>(
+    'SELECT id, national_dex_number FROM pokemon_species WHERE species_key = $1',
+    [speciesKey]
+  );
+
+  if (byKey[0]) {
+    if (national !== null && byKey[0].national_dex_number === null) {
+      const conflict = await db.select<Array<{ id: number }>>(
+        'SELECT id FROM pokemon_species WHERE national_dex_number = $1 AND id <> $2',
+        [national, byKey[0].id]
+      );
+
+      if (!conflict[0]) {
+        await db.execute(
+          'UPDATE pokemon_species SET national_dex_number = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+          [national, byKey[0].id]
+        );
+      }
+    }
+
+    return byKey[0].id;
+  }
+
+  if (national !== null) {
+    const byNumber = await db.select<Array<{ id: number }>>(
+      'SELECT id FROM pokemon_species WHERE national_dex_number = $1',
+      [national]
+    );
+
+    if (byNumber[0]) return byNumber[0].id;
+  }
+
+  await db.execute(
+    `INSERT INTO pokemon_species (species_key, national_dex_number, canonical_name, source_id)
+     VALUES ($1, $2, $3, $4)`,
+    [speciesKey, national, input.name.trim(), sourceId]
+  );
+
+  const inserted = await db.select<Array<{ id: number }>>(
+    'SELECT id FROM pokemon_species WHERE species_key = $1',
+    [speciesKey]
+  );
+
+  return inserted[0]?.id ?? null;
+}
+
 export async function listGamePokemon(versionId: number): Promise<GamePokemon[]> {
   const db = await getDatabase();
 
@@ -237,11 +313,15 @@ export async function listGamePokemon(versionId: number): Promise<GamePokemon[]>
       gp.sprite_path,
       gp.is_obtainable,
       gp.source_id,
+      gp.source_url,
+      ps.species_key,
+      ps.national_dex_number,
       ds.name AS source_name,
       ds.attribution_text AS source_attribution,
       ds.license_name AS source_license
     FROM game_pokemon gp
     LEFT JOIN data_sources ds ON ds.id = gp.source_id
+    LEFT JOIN pokemon_species ps ON ps.id = gp.species_id
     WHERE gp.game_version_id = $1
     ORDER BY gp.dex_number ASC, gp.form_name COLLATE NOCASE ASC, gp.name COLLATE NOCASE ASC
   `, [versionId]);
@@ -279,6 +359,8 @@ export async function saveGamePokemon(
   }
 
   const sourceId = await validateSourceId(db, input.source_id);
+  const speciesId = await resolveSpeciesId(db, input, sourceId);
+  const sourceUrl = (input.source_url ?? '').trim();
   const abilities = serializeAbilities(input.abilities);
   const stats = serializeStats(input.base_stats);
 
@@ -287,6 +369,7 @@ export async function saveGamePokemon(
       await db.execute(`
         INSERT INTO game_pokemon (
           game_version_id,
+          species_id,
           dex_number,
           name,
           form_name,
@@ -298,10 +381,12 @@ export async function saveGamePokemon(
           sprite_url,
           sprite_path,
           is_obtainable,
-          source_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          source_id,
+          source_url
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
       `, [
         versionId,
+        speciesId ?? null,
         dexNumber,
         name,
         formName,
@@ -313,7 +398,8 @@ export async function saveGamePokemon(
         input.sprite_url.trim(),
         input.sprite_path.trim(),
         input.is_obtainable ? 1 : 0,
-        sourceId
+        sourceId,
+        sourceUrl
       ]);
       return;
     }
@@ -333,8 +419,10 @@ export async function saveGamePokemon(
         sprite_path = $10,
         is_obtainable = $11,
         source_id = $12,
+        source_url = $13,
+        species_id = COALESCE($14, species_id),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $13 AND game_version_id = $14
+      WHERE id = $15 AND game_version_id = $16
     `, [
       dexNumber,
       name,
@@ -348,6 +436,8 @@ export async function saveGamePokemon(
       input.sprite_path.trim(),
       input.is_obtainable ? 1 : 0,
       sourceId,
+      sourceUrl,
+      speciesId ?? null,
       pokemonId,
       versionId
     ]);

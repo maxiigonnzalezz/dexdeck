@@ -22,6 +22,8 @@ export type ImportIssue = {
 
 export type ImportAction = 'insert' | 'update' | 'skip';
 
+export type ImportFormat = 'csv' | 'json' | 'pokeapi' | 'mediawiki';
+
 export type ImportCandidate = {
   line: number;
   action: ImportAction;
@@ -31,7 +33,7 @@ export type ImportCandidate = {
 };
 
 export type ImportPreview = {
-  format: 'csv' | 'json';
+  format: ImportFormat;
   candidates: ImportCandidate[];
   issues: ImportIssue[];
   counts: { insert: number; update: number; skip: number; errors: number; warnings: number };
@@ -67,7 +69,10 @@ const HEADER_ALIASES: Record<string, string[]> = {
   sprite_url: ['sprite_url', 'sprite', 'imagen', 'url_sprite'],
   sprite_path: ['sprite_path', 'ruta_sprite', 'ruta_imagen'],
   is_obtainable: ['obtenible', 'is_obtainable', 'obtainable', 'disponible'],
-  source: ['fuente', 'source', 'origen', 'source_key']
+  source: ['fuente', 'source', 'origen', 'source_key'],
+  source_url: ['source_url', 'url_fuente', 'url_origen'],
+  species_key: ['species_key', 'clave_especie'],
+  national_dex_number: ['national_dex_number', 'numero_nacional', 'national_dex']
 };
 
 const TYPE_LOOKUP = new Map<string, PokemonType>();
@@ -189,7 +194,8 @@ function sameEntry(existing: GamePokemon, input: GamePokemonInput): boolean {
     existing.sprite_url === input.sprite_url.trim() &&
     existing.sprite_path === input.sprite_path.trim() &&
     existing.is_obtainable === (input.is_obtainable ? 1 : 0) &&
-    existing.source_id === input.source_id
+    existing.source_id === input.source_id &&
+    existing.source_url === (input.source_url ?? '').trim()
   );
 }
 
@@ -333,6 +339,30 @@ function buildInput(
   }
 
   const spritePath = pick(record, 'sprite_path').trim();
+
+  const speciesKey = pick(record, 'species_key').trim().toLowerCase();
+  if (speciesKey !== '' && !/^[a-z0-9][a-z0-9:_-]{0,79}$/.test(speciesKey)) {
+    return fail('La clave de especie no es válida. Usa letras, números, guiones, guiones bajos y dos puntos.');
+  }
+
+  const nationalRaw = pick(record, 'national_dex_number');
+  let nationalNumber: number | null = null;
+  if (nationalRaw !== '') {
+    nationalNumber = parseInteger(nationalRaw);
+    if (nationalNumber === null || nationalNumber <= 0 || nationalNumber > 9999) {
+      return fail('El número nacional debe ser un entero entre 1 y 9999.');
+    }
+  }
+
+  const sourceUrl = pick(record, 'source_url').trim();
+  if (sourceUrl !== '' && !isWebUrl(sourceUrl)) {
+    issues.push({
+      line,
+      message: `La URL de origen no es válida y se ignorará: «${sourceUrl}».`,
+      severity: 'warning'
+    });
+  }
+
   const sourceValue = pick(record, 'source');
   const source = resolveSource(sourceValue, sources);
   if (sourceValue !== '' && !source) {
@@ -358,7 +388,10 @@ function buildInput(
       sprite_url: isWebUrl(spriteUrl) ? spriteUrl : '',
       sprite_path: spritePath,
       is_obtainable: parseBoolean(pick(record, 'is_obtainable')),
-      source_id: source?.id ?? null
+      source_id: source?.id ?? null,
+      source_url: isWebUrl(sourceUrl) ? sourceUrl : '',
+      species_key: speciesKey,
+      national_dex_number: nationalNumber
     },
     label
   };
@@ -372,7 +405,7 @@ type ParsedRow = {
 
 export function buildPreview(
   records: ParsedRow[],
-  format: 'csv' | 'json',
+  format: ImportFormat,
   sources: DataSource[],
   existing: GamePokemon[],
   packGame = '',

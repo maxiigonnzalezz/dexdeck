@@ -525,6 +525,12 @@ pub fn run() {
             sql: include_str!("migrations/0012_pokemon_forms.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 13,
+            description: "remote_sources",
+            sql: include_str!("migrations/0013_remote_sources.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
