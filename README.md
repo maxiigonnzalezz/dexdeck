@@ -83,15 +83,14 @@ DexDeck se encuentra en una fase temprana de desarrollo (`0.1.0`). La biblioteca
 | Mapas y guías | 🗺️ Estructura preparada | Modelo de datos; falta editor y visor funcional |
 | Sincronización y caché offline | 🚧 Planeado | Aún no implementado |
 | Lanzadores de ROM y emuladores | 🚧 Planeado | Adaptadores pendientes |
-| Centro de actualizaciones | 🚧 Planeado | Pantalla provisional |
+| Centro de actualizaciones | ✅ Funcional | Comprobación e instalación de actualizaciones con el plugin updater |
 
 **Leyenda:** ✅ implementado · 🧱 primera versión o cimientos integrados · 🚧 pendiente · 🧪 requiere validación.
 
 ### Última comprobación conocida
 
-- `pnpm check`: **0 errores y 0 advertencias** después de la recolección desde PokéAPI.
-- `pnpm test:import`: **20 pruebas** de las piezas puras de importación y red.
-- Esa comprobación fue anterior a la validación final del paquete visual Liquid Glass v2. Hay que volver a ejecutarla después de instalar cualquier actualización de estilos.
+- Comprobado el 2026-11-14 con el arnés WebdriverIO integrado: `pnpm check` con **0 errores y 0 advertencias** (incluye los tipos de los tests WDIO), `pnpm test:import` **20/20**, `pnpm test:ui` **3 specs / 7 pruebas** en Chromium con backend simulado, y `cargo check` con y sin la feature `wdio`.
+- La validación final del paquete visual Liquid Glass v2 sigue pendiente: hay que volver a ejecutar las comprobaciones después de instalar cualquier actualización de estilos.
 - No se considera terminada una función solo porque exista su tabla, su tipo TypeScript o una pestaña visual: también debe disponer de operaciones, interfaz y pruebas suficientes.
 
 ---
@@ -111,7 +110,7 @@ La biblioteca permite mantener una colección de juegos instalada o pendiente de
 - Lanzar ejecutables `.exe` mediante Wine.
 - Ocultar una entrada de la biblioteca sin borrar los archivos del juego.
 
-**Comportamiento de eliminación:** actualmente, quitar un juego de la biblioteca guarda su ID en `localStorage`. No elimina la fila de SQLite ni los archivos del disco. La restauración y la eliminación definitiva son mejoras futuras.
+**Comportamiento de eliminación:** actualmente, quitar un juego de la biblioteca lo oculta (columna `is_hidden` en SQLite); no elimina la fila ni los archivos del disco. Todavía falta una pantalla para restaurar o borrar definitivamente los juegos ocultos.
 
 ### 2. Detección automática de información
 
@@ -352,7 +351,7 @@ También se prevé:
 
 ### Fase 9 — Actualizaciones, ajustes y distribución
 
-- [ ] Centro de actualizaciones real.
+- [x] Centro de actualizaciones real.
 - [ ] Consulta de fuentes oficiales de cada proyecto.
 - [ ] Comparación entre versiones instaladas y publicadas.
 - [ ] Historial de cambios y enlaces a las fuentes.

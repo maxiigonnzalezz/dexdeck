@@ -81,14 +81,14 @@ DexDeck is at an early stage of development (`0.1.0`). The personal library alre
 | Maps and guides | 🗺️ Structure prepared | Data model; functional editor and viewer are still missing |
 | Offline synchronization and cache | 🚧 Planned | Not implemented yet |
 | ROM and emulator launchers | 🚧 Planned | Adapters still pending |
-| Update centre | 🚧 Planned | Provisional screen |
+| Update centre | ✅ Functional | Checks and installs updates via the Tauri updater plugin |
 
 **Legend:** ✅ implemented · 🧱 first version or foundations integrated · 🚧 pending · 🧪 requires validation.
 
 ### Latest known check
 
-- `pnpm check`: **0 errors and 0 warnings** after fixing the structure of `Encyclopedia.svelte`.
-- That check took place before the final validation of the Liquid Glass v2 visual package. It must be run again after installing any style updates.
+- Checked on 2026-11-14 with the WebdriverIO harness in place: `pnpm check` **0 errors and 0 warnings** (including WDIO test types), `pnpm test:import` **20/20**, `pnpm test:ui` **3 specs / 7 tests** in Chromium with a mocked backend, and `cargo check` with and without the `wdio` feature.
+- The final validation of the Liquid Glass v2 visual package is still pending: checks must be run again after installing any style updates.
 - A feature is not considered complete just because its table, TypeScript type or visual tab exists: it must also have operations, an interface and sufficient tests.
 
 ---
@@ -108,7 +108,7 @@ The library lets users maintain a collection of games that are installed or stil
 - Launch `.exe` executables through Wine.
 - Hide a library entry without deleting the game's files.
 
-**Removal behaviour:** currently, removing a game from the library stores its ID in `localStorage`. It does not delete the SQLite row or files from disk. Restoring entries and permanently deleting them are future improvements.
+**Removal behaviour:** currently, removing a game from the library hides it (`is_hidden` column in SQLite); it does not delete the row or files from disk. A screen to restore or permanently delete hidden games is still pending.
 
 ### 2. Automatic information detection
 
@@ -348,7 +348,7 @@ Other planned features:
 
 ### Phase 9 — Updates, settings and distribution
 
-- [ ] Actual update centre.
+- [x] Actual update centre.
 - [ ] Check official sources for each project.
 - [ ] Compare installed and published versions.
 - [ ] Changelog and links to sources.
