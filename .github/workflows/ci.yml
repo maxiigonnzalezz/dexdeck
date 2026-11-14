@@ -18,9 +18,9 @@ concurrency:
 
 jobs:
   frontend:
-    name: Frontend (tipos y build)
+    name: Frontend (tipos, build y tests)
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -39,9 +39,26 @@ jobs:
       - name: Type and Svelte check
         run: pnpm check
 
+      - name: Import tests
+        run: pnpm test:import
+
       # `pnpm check` no valida el CSS; solo el build real lo hace.
       - name: Production build
         run: pnpm build
+
+      # La conf de WDIO usa el Chromium/chromedriver del sistema; en CI se
+      # instalan aquí y se pasan por CHROME_BIN/CHROMEDRIVER_PATH.
+      - name: Set up Chrome and ChromeDriver
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          install-chromedriver: true
+
+      - name: UI tests (Chromium con Tauri simulado)
+        run: pnpm test:ui
+        env:
+          CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          CHROMEDRIVER_PATH: ${{ steps.chrome.outputs.chromedriver-path }}
 
   rust:
     name: Rust (tests)
