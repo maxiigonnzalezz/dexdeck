@@ -533,7 +533,7 @@ pub fn run() {
         },
     ];
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         // Debe ser el primer plugin: detecta una segunda instancia antes del resto.
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
@@ -578,7 +578,14 @@ pub fn run() {
             get_wallpaper_snapshot,
             maintenance::get_installation_info,
             maintenance::start_uninstall
-        ])
+        ]);
+
+    #[cfg(feature = "wdio")]
+    let builder = builder
+        .plugin(tauri_plugin_wdio::init())
+        .plugin(tauri_plugin_wdio_webdriver::init());
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

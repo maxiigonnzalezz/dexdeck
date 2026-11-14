@@ -751,7 +751,7 @@ async function removeSelectedGame() {
   <meta name="theme-color" content="#0c1222" />
 </svelte:head>
 
-<div class="app-shell" data-theme={theme}>
+<div class="app-shell" data-theme={theme} data-testid="app-shell">
   <aside class="sidebar">
     <a class="brand" href="#inicio" onclick={() => navigate('Biblioteca')}>
       <div class="brand-mark"><span class="brand-core"></span></div>
@@ -770,6 +770,7 @@ async function removeSelectedGame() {
           class:active={activeSection === item.label}
           class="nav-item"
           aria-current={activeSection === item.label ? 'page' : undefined}
+          data-testid={`nav-${item.label.toLowerCase().replaceAll(' ', '-').replaceAll('ñ', 'n')}`}
           onclick={() => navigate(item.label)}
         >
           <span class="nav-icon">{item.icon}</span>
@@ -876,7 +877,7 @@ async function removeSelectedGame() {
       {/if}
 
       {#if notice}
-        <div class="notice" role="status">
+        <div class="notice" role="status" data-testid="notice">
           <span>✧</span> {notice}
           <button aria-label="Cerrar aviso" onclick={() => notice = ''}>×</button>
         </div>
@@ -910,16 +911,16 @@ async function removeSelectedGame() {
     Guarda la información de tu fangame. Puedes completar los datos técnicos más adelante.
   </p>
 
-  <form onsubmit={(event) => { event.preventDefault(); void saveGame(); }}>
+  <form data-testid="add-game-form" onsubmit={(event) => { event.preventDefault(); void saveGame(); }}>
     <div class="form-grid">
       <label class="form-label full-width">
         Nombre del juego <span>*</span>
-        <input bind:value={newName} placeholder="Ej. Pokémon Eclipse" required maxlength="80" oninput={() => (nameManuallyEdited = true)} />
+        <input bind:value={newName} data-testid="game-name-input" placeholder="Ej. Pokémon Eclipse" required maxlength="80" oninput={() => (nameManuallyEdited = true)} />
       </label>
 
       <label class="form-label">
         Desarrollador
-        <input bind:value={newDeveloper} placeholder="Creador o equipo" maxlength="100" />
+        <input bind:value={newDeveloper} data-testid="game-developer-input" placeholder="Creador o equipo" maxlength="100" />
       </label>
 
       <label class="form-label">
@@ -951,7 +952,7 @@ async function removeSelectedGame() {
 
       <label class="form-label full-width">
         Descripción
-        <textarea bind:value={newDescription} placeholder="Historia, características, región, generación..." rows="4" maxlength="3000"></textarea>
+        <textarea bind:value={newDescription} data-testid="game-description-input" placeholder="Historia, características, región, generación..." rows="4" maxlength="3000"></textarea>
       </label>
 
       <label class="form-label full-width">
@@ -1008,12 +1009,12 @@ async function removeSelectedGame() {
     </div>
 
     {#if formError}
-      <p class="form-notice" role="alert">{formError}</p>
+      <p class="form-notice" role="alert" data-testid="form-error">{formError}</p>
     {/if}
 
     <div class="modal-actions">
       <button type="button" class="secondary-button" onclick={() => addDialog?.close()}>Cancelar</button>
-      <button type="submit" class="primary-button" disabled={saving}>
+      <button type="submit" class="primary-button" data-testid="save-game-button" disabled={saving}>
         {saving ? 'Guardando…' : editingGameId !== null ? 'Guardar cambios' : 'Añadir a la biblioteca'}
         <span>→</span>
       </button>
@@ -1025,6 +1026,7 @@ async function removeSelectedGame() {
 <dialog
   bind:this={detailDialog}
   class="modal detail-modal"
+  data-testid="game-detail-dialog"
   aria-labelledby="detail-title"
   onclick={(event) => {
     if (event.target === detailDialog) detailDialog?.close();
@@ -1103,6 +1105,7 @@ async function removeSelectedGame() {
   <dialog
     bind:this={gameDialog}
     class="modal game-details-modal"
+    data-testid="game-details-dialog"
     aria-labelledby="game-modal-title"
     onclose={() => {
       selectedGame = null;

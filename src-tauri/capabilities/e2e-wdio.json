@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "e2e-wdio",
+  "description": "Permisos del plugin de pruebas WebdriverIO. Solo se incluye con --config src-tauri/tauri.e2e.conf.json.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "wdio:default",
+    "wdio-webdriver:default"
+  ]
+}

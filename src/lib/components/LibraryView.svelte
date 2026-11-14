@@ -92,7 +92,7 @@
       <div class="section-kicker">TU COLECCIÓN</div>
       <h2>Biblioteca <span class="heading-count">{games.length}</span></h2>
     </div>
-    <button class="primary-button" onclick={onAdd}>
+    <button class="primary-button" data-testid="add-game-button" onclick={onAdd}>
       <span>＋</span> Añadir juego
     </button>
   </div>
@@ -102,6 +102,7 @@
       <span class="search-icon">⌕</span>
       <input
         aria-label="Buscar juegos"
+        data-testid="search-games"
         placeholder="Buscar por nombre, desarrollador o descripción..."
         bind:value={search}
         title="Pulsa Escape para limpiar la búsqueda"
@@ -118,7 +119,7 @@
   {#if filteredGames.length > 0}
     <div class="game-grid">
       {#each filteredGames as game (game.id)}
-        <article class="game-card">
+        <article class="game-card" data-testid="game-card" data-game-name={game.name}>
           <button
             class={`game-art art-${game.color}`}
             aria-label={`Ver ficha de ${game.name}`}
@@ -197,7 +198,7 @@
       {/each}
     </div>
   {:else}
-    <div class="empty-state">
+    <div class="empty-state" data-testid="empty-library">
       <div class="empty-symbol">⌕</div>
       <h3>{games.length === 0 ? 'Tu biblioteca está esperando aventuras' : 'No encontramos ese juego'}</h3>
       <p>
