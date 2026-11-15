@@ -11,7 +11,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tests/wdio/tsconfig.json",
     "check:tests": "tsc -p tests/wdio/tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "test:import": "node --experimental-strip-types --import ./scripts/register-imports.mjs --test scripts/import-checks.test.ts",
+    "test:import": "node --experimental-strip-types --import ./tests/import/register-imports.mjs --test tests/import/import-checks.test.ts",
     "test:ui": "wdio run tests/wdio/wdio.browser.conf.ts",
     "test:e2e": "wdio run tests/wdio/wdio.tauri.conf.ts",
     "test:e2e:build": "VITE_WDIO=1 tauri build --debug --no-bundle --features wdio --config src-tauri/tauri.e2e.conf.json",

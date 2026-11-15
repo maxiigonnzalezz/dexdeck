@@ -6,7 +6,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
 
-const libRoot = fileURLToPath(new URL('../src/lib/', import.meta.url));
+const libRoot = fileURLToPath(new URL('../../src/lib/', import.meta.url));
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
