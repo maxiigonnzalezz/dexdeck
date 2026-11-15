@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ImportPreview } from '$lib/import/pokemon-import';
+  import { remainingPreviewRows, safeSpriteSource, spriteFallbackName, visiblePreviewRows } from '$lib/pokedex-preview';
 
   type Props = {
     preview: ImportPreview;
@@ -23,21 +24,23 @@
     onCancel
   }: Props = $props();
 
-  const MAX_VISIBLE_ROWS = 40;
   const MAX_VISIBLE_ISSUES = 25;
 
   let actionable = $derived(preview.counts.insert + preview.counts.update);
-  let visibleRows = $derived(preview.candidates.slice(0, MAX_VISIBLE_ROWS));
+  let visibleRows = $derived(visiblePreviewRows(preview.candidates));
   let visibleIssues = $derived(preview.issues.slice(0, MAX_VISIBLE_ISSUES));
   let packMismatch = $derived(
     Boolean(preview.packGame) && preview.packGame?.toLowerCase() !== gameName.toLowerCase()
   );
+
+  let failedSprites = $state<Record<number, boolean>>({});
 
   function actionLabel(action: 'insert' | 'update' | 'skip') {
     if (action === 'insert') return 'Nueva';
     if (action === 'update') return 'Actualiza';
     return 'Sin cambios';
   }
+
 </script>
 
 {#if packMismatch}
@@ -57,20 +60,47 @@
   <div class="pdi-table-wrap">
     <table class="pdi-table">
       <thead>
-        <tr><th>Línea</th><th>Entrada</th><th>Acción</th></tr>
+        <tr>
+          <th>Línea</th>
+          <th>Sprite</th>
+          <th>N.º</th>
+          <th>Nombre</th>
+          <th>Acción</th>
+        </tr>
       </thead>
       <tbody>
         {#each visibleRows as row (row.line)}
+          {@const spriteSrc = safeSpriteSource(row.input)}
+          {@const hasFailed = failedSprites[row.line]}
           <tr>
             <td>{row.line}</td>
-            <td>{row.label}</td>
+            <td class="pdi-sprite-cell">
+              {#if spriteSrc && !hasFailed}
+                <img
+                  src={spriteSrc}
+                  alt=""
+                  class="pdi-sprite-img"
+                  loading="lazy"
+                  onerror={() => (failedSprites[row.line] = true)}
+                />
+              {:else}
+                <span class="pdi-sprite-placeholder">{spriteFallbackName(row.input.name)}</span>
+              {/if}
+            </td>
+            <td class="pdi-num-cell">#{String(row.input.dex_number).padStart(3, '0')}</td>
+            <td class="pdi-name-cell">
+              <strong>{row.input.name}</strong>
+              {#if row.input.form_name}
+                <span class="pdi-form-badge">({row.input.form_name})</span>
+              {/if}
+            </td>
             <td><span class="pdi-badge pdi-badge-{row.action}">{actionLabel(row.action)}</span></td>
           </tr>
         {/each}
       </tbody>
     </table>
-    {#if preview.candidates.length > MAX_VISIBLE_ROWS}
-      <p class="pdi-more">y {preview.candidates.length - MAX_VISIBLE_ROWS} entradas más…</p>
+    {#if remainingPreviewRows(preview.candidates) > 0}
+      <p class="pdi-more" data-testid="pdi-more">+{remainingPreviewRows(preview.candidates)} más</p>
     {/if}
   </div>
 {/if}
@@ -138,11 +168,13 @@
   .pdi-table-wrap {
     border: 1px solid var(--enc-border);
     border-radius: 11px;
-    overflow: hidden;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
   }
 
   .pdi-table {
     width: 100%;
+    min-width: 520px;
     border-collapse: collapse;
     font-size: 0.76rem;
   }
@@ -161,12 +193,61 @@
   .pdi-table td {
     padding: 8px 12px;
     border-top: 1px solid var(--enc-border);
+    vertical-align: middle;
   }
 
   .pdi-table td:first-child {
     color: var(--enc-muted);
     font-variant-numeric: tabular-nums;
-    width: 64px;
+    width: 52px;
+  }
+
+  .pdi-sprite-cell {
+    width: 44px;
+    padding: 4px 8px !important;
+    text-align: center;
+  }
+
+  .pdi-sprite-img {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.04);
+    display: block;
+    margin: 0 auto;
+  }
+
+  .pdi-sprite-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    margin: 0 auto;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--enc-muted);
+    font-weight: 700;
+    font-size: 0.8rem;
+  }
+
+  .pdi-num-cell {
+    width: 56px;
+    color: var(--enc-muted);
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  .pdi-name-cell {
+    font-size: 0.82rem;
+  }
+
+  .pdi-form-badge {
+    margin-left: 6px;
+    font-size: 0.72rem;
+    color: var(--enc-muted);
+    font-weight: normal;
   }
 
   .pdi-badge {

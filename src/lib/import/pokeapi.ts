@@ -2,6 +2,7 @@
 // descargadas y devuelve las mismas filas normalizadas que el importador de
 // archivos, para que la validación y la vista previa sean únicas.
 import { mapWithConcurrency } from './concurrency';
+import { appendGameExclusiveEntries, isExclusiveToOtherGame } from './game-pokedex';
 import type { ImportIssue, ParsedRow, RawRecord } from './pokemon-import';
 
 const API = 'https://pokeapi.co/api/v2';
@@ -32,6 +33,7 @@ export type ToRawRecordInput = {
 
 export type CollectOptions = {
   pokedexKey: string;
+  gameKey?: string;
   maxEntries?: number;
   fetchJson: (url: string) => Promise<unknown>;
   onProgress?: (progress: { done: number; total: number; current: string }) => void;
@@ -42,53 +44,42 @@ export type CollectResult = {
   records: ParsedRow[];
   issues: ImportIssue[];
   cancelled: boolean;
+  exclusiveAdded: number;
 };
 
-export const POKEDEX_LABELS: Record<string, string> = {
-  kanto: 'Kanto',
-  'updated-kanto': 'Kanto (actualizada)',
-  'original-johto': 'Johto (original)',
-  'updated-johto': 'Johto (actualizada)',
-  hoenn: 'Hoenn',
-  'updated-hoenn': 'Hoenn (actualizada)',
-  sinnoh: 'Sinnoh',
-  'extended-sinnoh': 'Sinnoh (extendida)',
-  unova: 'Unova',
-  'updated-unova': 'Unova (actualizada)',
-  'kalos-central': 'Kalos (centro)',
-  'kalos-coastal': 'Kalos (costa)',
-  'kalos-mountain': 'Kalos (montaña)',
-  'original-alola': 'Alola (original)',
-  'updated-alola': 'Alola (actualizada)',
-  galar: 'Galar',
-  'isle-of-armor': 'Isla de la Armadura',
-  'crown-tundra': 'Tundra Corona',
-  hisui: 'Hisui',
-  paldea: 'Paldea',
-  kitakami: 'Kitakami',
-  blueberry: 'Meseta Blueberry',
-  'letsgo-kanto': 'Kanto (Let’s Go)',
-  'conquest-gallery': 'Conquista',
-  national: 'Nacional'
-};
+export const REGIONAL_POKEDEXES = [
+  { key: 'kanto', label: 'Kanto', sourceKeys: ['kanto'] },
+  { key: 'original-johto', label: 'Johto', sourceKeys: ['original-johto'] },
+  { key: 'hoenn', label: 'Hoenn', sourceKeys: ['hoenn'] },
+  { key: 'sinnoh', label: 'Sinnoh', sourceKeys: ['sinnoh'] },
+  { key: 'unova', label: 'Teselia', sourceKeys: ['unova'] },
+  {
+    key: 'kalos',
+    label: 'Kalos',
+    sourceKeys: ['kalos-central', 'kalos-coastal', 'kalos-mountain']
+  },
+  { key: 'original-alola', label: 'Alola', sourceKeys: ['original-alola'] },
+  { key: 'galar', label: 'Galar', sourceKeys: ['galar'] },
+  { key: 'hisui', label: 'Hisui', sourceKeys: ['hisui'] },
+  { key: 'paldea', label: 'Paldea', sourceKeys: ['paldea'] }
+] as const;
 
-const POKEDEX_ORDER = Object.keys(POKEDEX_LABELS);
+export const POKEDEX_LABELS: Record<string, string> = Object.fromEntries(
+  REGIONAL_POKEDEXES.map(({ key, label }) => [key, label])
+);
+
 
 const SUGGESTIONS: Array<{ key: string; words: string[] }> = [
-  { key: 'updated-johto', words: ['heartgold', 'soulsilver', 'oro heartgold', 'plata soulsilver'] },
-  { key: 'kanto', words: ['firered', 'leafgreen', 'rojo fuego', 'verde hoja'] },
-  { key: 'updated-hoenn', words: ['omega ruby', 'alpha sapphire', 'rubi omega', 'zafiro alfa'] },
-  { key: 'sinnoh', words: ['diamond', 'pearl', 'platinum', 'diamante', 'perla', 'platino', 'brillante', 'resplandeciente'] },
-  { key: 'updated-unova', words: ['black 2', 'white 2', 'negro 2', 'blanco 2'] },
-  { key: 'updated-alola', words: ['ultra sun', 'ultra moon', 'ultrasol', 'ultraluna'] },
-  { key: 'letsgo-kanto', words: ['lets go', 'let’s go', 'let s go'] },
-  { key: 'hoenn', words: ['ruby', 'sapphire', 'emerald', 'rubi', 'zafiro', 'esmeralda'] },
-  { key: 'unova', words: ['black', 'white', 'negro', 'blanco'] },
-  { key: 'original-alola', words: ['sun', 'moon', 'sol', 'luna'] },
-  { key: 'galar', words: ['sword', 'shield', 'espada', 'escudo'] },
-  { key: 'hisui', words: ['legends', 'leyendas', 'arceus'] },
-  { key: 'paldea', words: ['scarlet', 'violet', 'escarlata', 'purpura'] },
-  { key: 'kanto', words: ['red', 'blue', 'yellow', 'green', 'rojo', 'azul', 'amarillo', 'verde', 'pikachu', 'eevee'] }
+  { key: 'hisui', words: ['legends arceus', 'leyendas arceus', 'arceus'] },
+  { key: 'kalos', words: ['pokemon x', 'pokemon y', 'kalos'] },
+  { key: 'paldea', words: ['scarlet', 'violet', 'escarlata', 'purpura', 'paldea'] },
+  { key: 'galar', words: ['sword', 'shield', 'espada', 'escudo', 'galar'] },
+  { key: 'original-alola', words: ['ultra sun', 'ultra moon', 'ultrasol', 'ultraluna', 'pokemon sun', 'pokemon moon', 'pokemon sol', 'pokemon luna', 'alola'] },
+  { key: 'unova', words: ['black 2', 'white 2', 'negro 2', 'blanco 2', 'pokemon black', 'pokemon white', 'pokemon negro', 'pokemon blanco', 'unova', 'teselia'] },
+  { key: 'sinnoh', words: ['brilliant diamond', 'shining pearl', 'diamante brillante', 'perla reluciente', 'diamond', 'pearl', 'platinum', 'diamante', 'perla', 'platino', 'sinnoh'] },
+  { key: 'hoenn', words: ['omega ruby', 'alpha sapphire', 'rubi omega', 'zafiro alfa', 'ruby', 'sapphire', 'emerald', 'rubi', 'zafiro', 'esmeralda', 'hoenn'] },
+  { key: 'original-johto', words: ['heartgold', 'soulsilver', 'oro heartgold', 'plata soulsilver', 'pokemon gold', 'pokemon silver', 'pokemon crystal', 'oro', 'plata', 'cristal', 'johto'] },
+  { key: 'kanto', words: ['fire red', 'leaf green', 'firered', 'leafgreen', 'rojo fuego', 'verde hoja', 'lets go', 'let s go', 'red', 'blue', 'yellow', 'green', 'rojo', 'azul', 'amarillo', 'verde', 'kanto'] }
 ];
 
 function normalize(value: string): string {
@@ -102,10 +93,10 @@ function normalize(value: string): string {
 
 /** Sugiere una Pokédex a partir del nombre del juego; `''` si no lo reconoce. */
 export function suggestPokedexKey(gameName: string, versionLabel: string): string {
-  const haystack = normalize(`${gameName} ${versionLabel}`);
+  const haystack = ` ${normalize(`${gameName} ${versionLabel}`)} `;
 
   for (const suggestion of SUGGESTIONS) {
-    if (suggestion.words.some((word) => haystack.includes(normalize(word)))) {
+    if (suggestion.words.some((word) => haystack.includes(` ${normalize(word)} `))) {
       return suggestion.key;
     }
   }
@@ -131,20 +122,16 @@ function arrayOf<T>(value: unknown): T[] {
 
 export function parsePokedexOptions(payload: unknown): PokedexOption[] {
   const results = arrayOf<Record<string, unknown>>(objectOf(payload).results);
-  const options: PokedexOption[] = [];
+  const availableKeys = new Set(
+    results
+      .map((result) => (typeof result.name === 'string' ? result.name : ''))
+      .filter((key) => key !== '')
+  );
 
-  for (const result of results) {
-    const key = typeof result.name === 'string' ? result.name : '';
-    if (key === '') continue;
-    options.push({ key, label: POKEDEX_LABELS[key] ?? prettyName(key) });
-  }
-
-  const position = (key: string) => {
-    const index = POKEDEX_ORDER.indexOf(key);
-    return index === -1 ? POKEDEX_ORDER.length : index;
-  };
-
-  return options.sort((a, b) => position(a.key) - position(b.key) || a.label.localeCompare(b.label));
+  // Una sola Pokédex base por región. Kalos se recolecta desde sus tres zonas.
+  return REGIONAL_POKEDEXES
+    .filter((region) => region.sourceKeys.some((sourceKey) => availableKeys.has(sourceKey)))
+    .map((region) => ({ key: region.key, label: region.label }));
 }
 
 export function parsePokedexEntries(payload: unknown): PokedexEntry[] {
@@ -264,12 +251,47 @@ export function toRawRecord(input: ToRawRecordInput): RawRecord {
 }
 
 export async function collectPokedex(options: CollectOptions): Promise<CollectResult> {
-  const { pokedexKey, fetchJson, onProgress, signal } = options;
+  const { pokedexKey, gameKey = '', fetchJson, onProgress, signal } = options;
   const issues: ImportIssue[] = [];
   const abilityNames = new Map<string, string>();
 
-  const pokedex = await fetchJson(`${API}/pokedex/${encodeURIComponent(pokedexKey)}`);
-  let entries = parsePokedexEntries(pokedex);
+  let entries: PokedexEntry[] = [];
+
+  if (pokedexKey === 'kalos') {
+    const [central, coastal, mountain] = await Promise.all([
+      fetchJson(`${API}/pokedex/kalos-central`),
+      fetchJson(`${API}/pokedex/kalos-coastal`),
+      fetchJson(`${API}/pokedex/kalos-mountain`)
+    ]);
+
+    const seenSpecies = new Set<string>();
+    let num = 1;
+
+    for (const dex of [central, coastal, mountain]) {
+      const regionEntries = parsePokedexEntries(dex).sort((a, b) => a.entryNumber - b.entryNumber);
+      for (const entry of regionEntries) {
+        const speciesIdentity = entry.speciesKey.toLocaleLowerCase('en');
+        if (!seenSpecies.has(speciesIdentity)) {
+          seenSpecies.add(speciesIdentity);
+          entries.push({
+            entryNumber: num++,
+            speciesKey: entry.speciesKey,
+            speciesUrl: entry.speciesUrl
+          });
+        }
+      }
+    }
+  } else {
+    const pokedex = await fetchJson(`${API}/pokedex/${encodeURIComponent(pokedexKey)}`);
+    entries = parsePokedexEntries(pokedex);
+  }
+
+  // La selección de edición amplía la Pokédex regional; nunca elimina entradas regionales.
+  const regionalSpecies = new Set(entries.map((entry) => entry.speciesKey.trim().toLowerCase()));
+  if (gameKey !== '') {
+    const extended = appendGameExclusiveEntries(entries, gameKey, API);
+    entries = extended.entries;
+  }
 
   const max = options.maxEntries ?? 0;
   if (Number.isInteger(max) && max > 0) {
@@ -328,6 +350,7 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
           }
         });
 
+        if (isExclusiveToOtherGame(gameKey, entry.speciesKey)) rawRecord.is_obtainable = 'no';
         done += 1;
         onProgress?.({ done, total, current: String(rawRecord.name) });
 
@@ -351,5 +374,9 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
     .filter((row): row is ParsedRow => row !== undefined)
     .sort((a, b) => Number(a.record.dex_number) - Number(b.record.dex_number));
 
-  return { records, issues, cancelled: signal?.aborted ?? false };
+  const exclusiveAdded = records.filter(({ record }) => {
+    const speciesKey = (record.species_key ?? '').replace(/^pokeapi:/, '').trim().toLowerCase();
+    return speciesKey !== '' && !regionalSpecies.has(speciesKey);
+  }).length;
+  return { records, issues, cancelled: signal?.aborted ?? false, exclusiveAdded };
 }

@@ -10,8 +10,10 @@
     type ImportPreview
   } from '$lib/import/pokemon-import';
   import { collectPokedex, parsePokedexOptions, suggestPokedexKey } from '$lib/import/pokeapi';
+import { getPokedexGames, suggestPokedexGameKey } from '$lib/import/game-pokedex';
   import { fetchJson } from '$lib/import/http';
   import PokedexImportPreview from './PokedexImportPreview.svelte';
+  import { scrollLockDialog } from '$lib/scroll-lock';
 
   type Props = {
     versionId: number;
@@ -29,6 +31,10 @@
   let dialog: HTMLDialogElement | undefined = $state(undefined);
   let options = $state<Array<{ key: string; label: string }>>([]);
   let pokedexKey = $state('');
+  let pokedexGameKey = $state('');
+  let gameOptions = $derived(getPokedexGames(pokedexKey));
+  let exclusiveAdded = $state(0);
+  let selectedGameLabel = $derived(gameOptions.find((game) => game.key === pokedexGameKey)?.label ?? '');
   let maxEntries = $state<number | undefined>(undefined);
   let loadingOptions = $state(false);
   let downloading = $state(false);
@@ -52,6 +58,7 @@
     error = '';
     result = null;
     preview = null;
+    exclusiveAdded = 0;
     cancelledNotice = false;
     progress = { done: 0, total: 0, current: '' };
     maxEntries = undefined;
@@ -76,20 +83,34 @@
       ]);
 
       options = parsePokedexOptions(payload);
+      const [storedRegion = '', storedGame = ''] = stored.split('--', 2);
       const known = (key: string) => options.some((option) => option.key === key);
 
-      if (stored !== '' && known(stored)) {
-        pokedexKey = stored;
+      if (storedRegion !== '' && known(storedRegion)) {
+        pokedexKey = storedRegion;
       } else {
         const suggestion = suggestPokedexKey(gameName, versionLabel);
         pokedexKey = suggestion !== '' && known(suggestion) ? suggestion : (options[0]?.key ?? '');
       }
+
+      const games = getPokedexGames(pokedexKey);
+      const suggestedGame = suggestPokedexGameKey(gameName, versionLabel, pokedexKey);
+      pokedexGameKey = games.some((game) => game.key === storedGame)
+        ? storedGame
+        : (suggestedGame || games[0]?.key || '');
     } catch (loadError) {
       console.error('Error al cargar las Pokédex de PokéAPI:', loadError);
       error = 'No se ha podido cargar la lista de Pokédex. Comprueba la conexión e inténtalo de nuevo.';
     } finally {
       loadingOptions = false;
     }
+  }
+
+  function changeRegion(event: Event) {
+    const nextKey = (event.currentTarget as HTMLSelectElement).value;
+    pokedexKey = nextKey;
+    pokedexGameKey = getPokedexGames(nextKey)[0]?.key ?? '';
+    exclusiveAdded = 0;
   }
 
   function mergeIssues(built: ImportPreview, issues: ImportIssue[]): ImportPreview {
@@ -110,11 +131,12 @@
   }
 
   async function download() {
-    if (downloading || pokedexKey === '') return;
+    if (downloading || pokedexKey === '' || pokedexGameKey === '') return;
 
     error = '';
     result = null;
     preview = null;
+    exclusiveAdded = 0;
     cancelledNotice = false;
     progress = { done: 0, total: 0, current: '' };
     downloading = true;
@@ -125,6 +147,7 @@
       const limit = maxEntries !== undefined && maxEntries > 0 ? Math.floor(maxEntries) : 0;
       const outcome = await collectPokedex({
         pokedexKey,
+        gameKey: pokedexGameKey,
         maxEntries: limit,
         fetchJson: (url) => fetchJson(url, signal),
         onProgress: (next) => {
@@ -148,8 +171,9 @@
         versionLabel
       );
 
+      exclusiveAdded = outcome.exclusiveAdded;
       preview = mergeIssues(built, outcome.issues);
-      await setVersionRemotePokedex(versionId, pokedexKey);
+      await setVersionRemotePokedex(versionId, `${pokedexKey}--${pokedexGameKey}`);
     } catch (downloadError) {
       if (signal.aborted) {
         cancelledNotice = true;
@@ -191,14 +215,17 @@
 
   function resetPreview() {
     preview = null;
+    exclusiveAdded = 0;
     cancelledNotice = false;
   }
+
 </script>
 
 <button type="button" class="pdr-trigger" onclick={openDialog}>Recolectar de PokéAPI</button>
 
 <dialog
   bind:this={dialog}
+  use:scrollLockDialog
   class="pdr-dialog"
   aria-labelledby="pdr-title"
   onclick={(event) => { if (event.target === dialog) closeDialog(); }}
@@ -247,7 +274,7 @@
         <div class="pdr-form">
           <label>
             Pokédex
-            <select bind:value={pokedexKey} disabled={loadingOptions || downloading}>
+            <select value={pokedexKey} onchange={changeRegion} disabled={loadingOptions || downloading}>
               {#if loadingOptions}
                 <option value="">Cargando Pokédex…</option>
               {:else if options.length === 0}
@@ -255,6 +282,14 @@
               {/if}
               {#each options as option (option.key)}
                 <option value={option.key}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+          <label>
+            Juego
+            <select bind:value={pokedexGameKey} disabled={loadingOptions || downloading || gameOptions.length === 0}>
+              {#each gameOptions as game (game.key)}
+                <option value={game.key}>{game.label}</option>
               {/each}
             </select>
           </label>
@@ -270,8 +305,8 @@
           </label>
         </div>
         <p class="pdr-hint">
-          Déjalo vacío o en 0 para descargar la Pokédex completa. Las descripciones se toman en
-          español y, si no hay, en inglés; la vista previa avisa cuando se usa el inglés.
+          Se conserva toda la Pokédex regional y se añaden los Pokémon exclusivos de la edición elegida,
+          sin duplicar especies. Déjalo vacío o en 0 para importar todas las entradas.
         </p>
       {/if}
 
@@ -294,6 +329,11 @@
       {/if}
 
       {#if preview}
+        {#if exclusiveAdded > 0}
+          <div class="pdr-notice" role="status">
+            Se han añadido {exclusiveAdded} {exclusiveAdded === 1 ? 'Pokémon exclusivo' : 'Pokémon exclusivos'} de {selectedGameLabel} que no estaban en la Pokédex regional.
+          </div>
+        {/if}
         <PokedexImportPreview
           {preview}
           bind:mode
@@ -411,7 +451,7 @@
 
   .pdr-form {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 160px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 160px;
     gap: 12px;
   }
 

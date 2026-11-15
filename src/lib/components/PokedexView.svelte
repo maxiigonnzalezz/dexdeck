@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { tick } from 'svelte';
+  import { scrollLockDialog } from '$lib/scroll-lock';
   import {
+    clearGamePokemon,
     deleteGamePokemon,
     EMPTY_STATS,
     listGamePokemon,
@@ -64,6 +67,11 @@
   let formError = $state('');
   let pendingDelete = $state<GamePokemon | null>(null);
   let deleting = $state(false);
+  let clearing = $state(false);
+  let clearCount = $state(0);
+  let clearDialog: HTMLDialogElement | undefined = $state(undefined);
+  let detailDialog: HTMLDialogElement | undefined = $state(undefined);
+  let detailPokemon = $state<GamePokemon | null>(null);
 
   function createDraft(dexNumber = 1): Draft {
     return {
@@ -225,6 +233,38 @@
     }
   }
 
+  function askClearPokedex() {
+    clearCount = entries.length;
+    clearDialog?.showModal();
+  }
+
+  async function openDetail(entry: GamePokemon) {
+    detailPokemon = entry;
+    await tick();
+    detailDialog?.showModal();
+  }
+
+  function closeDetail() {
+    detailDialog?.close();
+    detailPokemon = null;
+  }
+
+  async function clearPokedex() {
+    clearing = true;
+    try {
+      const deleted = await clearGamePokemon(versionId);
+      clearDialog?.close();
+      await load();
+      onChanged?.();
+      error = `Se han eliminado ${deleted} entrada${deleted === 1 ? '' : 's'} de la Pokédex.`;
+    } catch (clearError) {
+      console.error('Error al vaciar la Pokédex:', clearError);
+      error = clearError instanceof Error ? clearError.message : 'No se ha podido vaciar la Pokédex.';
+    } finally {
+      clearing = false;
+    }
+  }
+
   function typeColor(type: PokemonType | '') {
     return type ? POKEMON_TYPE_COLORS[type] : 'transparent';
   }
@@ -257,6 +297,11 @@
         onImported={() => { void load(); onChanged?.(); }}
       />
       <button type="button" class="pdx-primary" onclick={openCreate}>＋ Añadir Pokémon</button>
+      {#if entries.length > 0}
+        <button type="button" class="pdx-danger" onclick={askClearPokedex} disabled={clearing}>
+          {clearing ? 'Vac…' : '🗑 Vaciar Pokédex'}
+        </button>
+      {/if}
     </div>
   </header>
 
@@ -308,10 +353,21 @@
   {:else}
     <div class="pdx-list">
       {#each filtered as entry (entry.id)}
-        <article class="pdx-row">
+        <article
+          class="pdx-row pdx-row-interactive"
+          data-testid={`pdx-row-${entry.dex_number}`}
+        >
+          <button
+            type="button"
+            class="pdx-row-hitarea"
+            aria-label={`Ver ficha de ${entry.name}`}
+            onclick={() => void openDetail(entry)}
+          ><span class="sr-only">Ver ficha de {entry.name}</span></button>
           <div class="pdx-sprite" aria-hidden="true">
             {#if entry.sprite_url && isWebUrl(entry.sprite_url)}
               <img src={entry.sprite_url} alt="" loading="lazy" />
+            {:else if entry.sprite_path}
+              <img src={entry.sprite_path} alt="" loading="lazy" />
             {:else}
               <span>{entry.name.slice(0, 2).toUpperCase()}</span>
             {/if}
@@ -319,7 +375,18 @@
 
           <div class="pdx-ident">
             <span class="pdx-number">{formatNumber(entry.dex_number)}</span>
-            <strong>{entry.name}</strong>
+            <button
+              type="button"
+              class="pdx-name-button"
+              data-testid={`pdx-name-${entry.dex_number}`}
+              aria-label={`Ver detalles de ${entry.name}`}
+              onclick={(e) => {
+                e.stopPropagation();
+                void openDetail(entry);
+              }}
+            >
+              {entry.name}
+            </button>
             {#if entry.form_name}<span class="pdx-form">{entry.form_name}</span>{/if}
           </div>
 
@@ -349,6 +416,7 @@
           </div>
 
           <div class="pdx-actions">
+              <button type="button" class="pdx-icon-button" aria-label={`Ver detalles de ${entry.name}`} title="Ver detalles" onclick={() => void openDetail(entry)}>👁</button>
             <button type="button" class="pdx-icon-button" aria-label={`Editar ${entry.name}`} title="Editar" onclick={() => openEdit(entry)}>✎</button>
             <button type="button" class="pdx-icon-button pdx-danger" aria-label={`Eliminar ${entry.name}`} title="Eliminar" onclick={() => askDelete(entry)}>🗑</button>
           </div>
@@ -360,6 +428,7 @@
 
 <dialog
   bind:this={formDialog}
+  use:scrollLockDialog
   class="pdx-dialog"
   aria-labelledby="pdx-form-title"
   onclick={(event) => { if (event.target === formDialog) closeForm(); }}
@@ -480,7 +549,7 @@
   </form>
 </dialog>
 
-<dialog bind:this={deleteDialog} class="pdx-dialog pdx-dialog-small" aria-labelledby="pdx-delete-title">
+<dialog bind:this={deleteDialog} use:scrollLockDialog class="pdx-dialog pdx-dialog-small" aria-labelledby="pdx-delete-title" onclick={(event) => { if (event.target === deleteDialog) deleteDialog?.close(); }}>
   <div class="pdx-delete">
     <div class="pdx-kicker">ELIMINAR ENTRADA</div>
     <h2 id="pdx-delete-title">
@@ -497,6 +566,116 @@
     </div>
   </div>
 </dialog>
+
+<dialog bind:this={clearDialog} use:scrollLockDialog class="pdx-dialog pdx-dialog-small" aria-labelledby="pdx-clear-title" onclick={(event) => { if (event.target === clearDialog) clearDialog?.close(); }}>
+  <div class="pdx-delete">
+    <div class="pdx-kicker">VACIAR POKÉDEX</div>
+    <h2 id="pdx-clear-title">Vaciar todas las entradas</h2>
+    <p>
+      Se eliminarán todas las {clearCount} entrada{clearCount === 1 ? '' : 's'} de {versionLabel}
+      y sus encuentros asociados. Esta acción no se puede deshacer.
+    </p>
+    <div class="pdx-dialog-actions">
+      <button type="button" class="pdx-secondary" onclick={() => clearDialog?.close()}>Cancelar</button>
+      <button type="button" class="pdx-danger-button" disabled={clearing} onclick={clearPokedex}>
+        {clearing ? 'Vaciando…' : 'Vaciar Pokédex'}
+      </button>
+    </div>
+  </div>
+</dialog>
+
+{#if detailPokemon}
+  <dialog bind:this={detailDialog} use:scrollLockDialog class="pdx-dialog pdx-dialog-detail" aria-labelledby="pdx-detail-title" onclose={() => (detailPokemon = null)} onclick={(event) => { if (event.target === detailDialog) closeDetail(); }}>
+    <div class="pdx-detail">
+      <div class="pdx-kicker">FICHA DE POKÉMON</div>
+      <h2 id="pdx-detail-title">
+        {detailPokemon.name}
+        {#if detailPokemon.form_name}<span class="pdx-form">{detailPokemon.form_name}</span>{/if}
+      </h2>
+      <button type="button" class="pdx-close" aria-label="Cerrar ficha" onclick={closeDetail}>×</button>
+
+      <div class="pdx-detail-grid">
+        <div class="pdx-detail-sprite">
+          {#if detailPokemon.sprite_url && isWebUrl(detailPokemon.sprite_url)}
+            <img src={detailPokemon.sprite_url} alt={`Sprite de ${detailPokemon.name}`} />
+          {:else if detailPokemon.sprite_path}
+            <img src={detailPokemon.sprite_path} alt={`Sprite de ${detailPokemon.name}`} />
+          {:else}
+            <span class="pdx-detail-sprite-placeholder">{detailPokemon.name.slice(0, 2).toUpperCase()}</span>
+          {/if}
+          <span class="pdx-detail-number">{formatNumber(detailPokemon.dex_number)}</span>
+          {#if detailPokemon.national_dex_number}
+            <span class="pdx-detail-national">Nacional #{String(detailPokemon.national_dex_number).padStart(4, '0')}</span>
+          {/if}
+        </div>
+
+        <div class="pdx-detail-info">
+          <div class="pdx-detail-types">
+            {#if detailPokemon.type_primary}
+              <span class="pdx-type" style={`--type-color: ${typeColor(detailPokemon.type_primary)}`}>
+                {POKEMON_TYPE_LABELS[detailPokemon.type_primary]}
+              </span>
+            {/if}
+            {#if detailPokemon.type_secondary}
+              <span class="pdx-type" style={`--type-color: ${typeColor(detailPokemon.type_secondary)}`}>
+                {POKEMON_TYPE_LABELS[detailPokemon.type_secondary]}
+              </span>
+            {/if}
+          </div>
+
+          <div class="pdx-detail-field">
+            <span class="pdx-detail-label">Habilidades</span>
+            <p class="pdx-detail-value">
+              {#if detailPokemon.abilities.length > 0}
+                {detailPokemon.abilities.join(', ')}
+              {:else}
+                Sin habilidades registradas
+              {/if}
+            </p>
+          </div>
+
+          <div class="pdx-detail-field">
+            <span class="pdx-detail-label">Entrada de la Pokédex</span>
+            <p class="pdx-detail-value pdx-detail-entry">{detailPokemon.dex_entry || 'Sin descripción.'}</p>
+          </div>
+
+          {#if detailPokemon.source_name}
+            <div class="pdx-detail-field">
+              <span class="pdx-detail-label">Fuente</span>
+              <p class="pdx-detail-value" title={detailPokemon.source_attribution ?? detailPokemon.source_name}>
+                {detailPokemon.source_name}
+              </p>
+            </div>
+          {/if}
+        </div>
+
+        <div class="pdx-detail-stats">
+          <h3>Estadísticas base</h3>
+          <div class="pdx-stat-list">
+            {#if detailPokemon.base_stats}
+              {#each Object.entries(detailPokemon.base_stats) as [key, value]}
+                <div class="pdx-stat-item">
+                  <span class="pdx-stat-name">{key.toUpperCase()}</span>
+                  <span class="pdx-stat-value">{value}</span>
+                </div>
+              {/each}
+              <div class="pdx-stat-item pdx-stat-total">
+                <span class="pdx-stat-name">Total</span>
+                <span class="pdx-stat-value">{Object.values(detailPokemon.base_stats).reduce((a, b) => a + b, 0)}</span>
+              </div>
+            {:else}
+              <p class="pdx-detail-value">Sin estadísticas registradas.</p>
+            {/if}
+          </div>
+        </div>
+      </div>
+
+      <div class="pdx-dialog-actions">
+        <button type="button" class="pdx-secondary" onclick={closeDetail}>Cerrar</button>
+      </div>
+    </div>
+  </dialog>
+{/if}
 
 <style>
   .pdx {
@@ -578,10 +757,17 @@
     color: var(--enc-text, inherit);
   }
 
+  .pdx-danger,
   .pdx-danger-button {
     border-color: rgba(244, 63, 94, 0.35);
     background: rgba(244, 63, 94, 0.16);
     color: #fb7185;
+  }
+
+  .pdx-danger:disabled,
+  .pdx-danger-button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .pdx-toolbar {
@@ -713,6 +899,8 @@
   }
 
   .pdx-row {
+    position: relative;
+    min-width: 0;
     display: grid;
     grid-template-columns: 48px minmax(130px, 1.5fr) minmax(110px, 1fr) auto auto;
     align-items: center;
@@ -721,6 +909,36 @@
     border: 1px solid var(--enc-border);
     border-radius: 12px;
     background: var(--enc-panel);
+  }
+
+  .pdx-row-hitarea {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: inherit;
+    background: transparent;
+    cursor: pointer;
+  }
+
+  .pdx-row-hitarea:focus-visible {
+    outline: 2px solid var(--enc-accent);
+    outline-offset: 2px;
+  }
+
+  .pdx-row > :not(.pdx-row-hitarea) {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  .pdx-row .pdx-name-button,
+  .pdx-row .pdx-actions,
+  .pdx-row .pdx-actions button {
+    pointer-events: auto;
   }
 
   .pdx-row:hover {
@@ -762,7 +980,7 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .pdx-ident strong {
+  .pdx-name-button {
     font-size: 0.9rem;
   }
 
@@ -846,7 +1064,8 @@
 
   .pdx-dialog {
     width: min(100% - 32px, 720px);
-    max-height: calc(100vh - 48px);
+    max-height: calc(100dvh - 32px);
+    min-width: 0;
     padding: 0;
     border: 1px solid var(--enc-border);
     border-radius: 16px;
@@ -1039,5 +1258,272 @@
 
   :global(html[data-theme='light']) .pdx-primary {
     color: #fff;
+  }
+
+  .pdx-dialog-detail {
+    width: min(100% - 32px, 860px);
+    max-width: 860px;
+    padding: 0;
+  }
+
+  .pdx-row-interactive {
+    cursor: pointer;
+    transition: border-color 150ms ease, background 150ms ease;
+  }
+
+  .pdx-row-interactive:hover {
+    border-color: rgba(98, 230, 194, 0.32);
+    background: var(--enc-panel);
+  }
+
+  .pdx-name-button {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    font: inherit;
+    font-weight: 700;
+    color: var(--enc-text, inherit);
+    cursor: pointer;
+    text-align: left;
+    display: inline;
+    outline: none;
+    border-radius: 4px;
+    transition: color 150ms ease;
+  }
+
+  .pdx-name-button:hover,
+  .pdx-name-button:focus-visible {
+    color: var(--enc-accent);
+    text-decoration: underline;
+  }
+
+  .pdx-name-button:focus-visible {
+    outline: 2px solid var(--enc-accent);
+    outline-offset: 2px;
+  }
+
+  /* Ficha detallada de Pokémon */
+  .pdx-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 24px;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .pdx-detail-grid {
+    display: grid;
+    grid-template-columns: minmax(170px, 200px) minmax(0, 1fr) minmax(180px, 220px);
+    gap: 20px;
+    align-items: start;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .pdx-detail-sprite,
+  .pdx-detail-info,
+  .pdx-detail-stats {
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .pdx-detail-sprite {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--enc-border);
+    border-radius: 12px;
+    background: var(--enc-panel);
+  }
+
+  .pdx-detail-sprite img {
+    width: 120px;
+    height: 120px;
+    object-fit: contain;
+    background: var(--enc-input);
+    border-radius: 8px;
+  }
+
+  .pdx-detail-sprite-placeholder {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--enc-border);
+    color: var(--enc-muted);
+    font-weight: 700;
+    font-size: 1.5rem;
+  }
+
+  .pdx-detail-number {
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--enc-muted);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .pdx-detail-national {
+    font-size: 0.7rem;
+    color: var(--enc-muted);
+    margin-top: 4px;
+  }
+
+  .pdx-detail-info {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .pdx-detail-types {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .pdx-detail-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .pdx-detail-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--enc-muted);
+  }
+
+  .pdx-detail-value {
+    margin: 0;
+    color: var(--enc-text, inherit);
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  .pdx-detail-entry {
+    font-style: italic;
+    color: color-mix(in srgb, var(--enc-text, inherit) 80%, transparent);
+  }
+
+  .pdx-detail-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 14px;
+    border: 1px solid var(--enc-border);
+    border-radius: 12px;
+    background: var(--enc-panel);
+  }
+
+  .pdx-detail-stats h3 {
+    margin: 0 0 8px 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--enc-muted);
+  }
+
+  .pdx-stat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .pdx-stat-item {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--enc-text, inherit);
+  }
+
+  .pdx-stat-item.pdx-stat-total {
+    border-top: 1px solid var(--enc-border);
+    padding-top: 8px;
+    margin-top: 4px;
+    font-weight: 700;
+    color: var(--enc-accent);
+  }
+
+  .pdx-stat-name {
+    color: var(--enc-muted);
+  }
+
+  @media (max-width: 820px) {
+    .pdx-dialog-detail {
+      width: min(100% - 24px, 600px);
+      max-height: calc(100dvh - 24px);
+    }
+    .pdx-detail-grid {
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .pdx-detail-sprite {
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 16px;
+    }
+    .pdx-detail-sprite img {
+      width: 96px;
+      height: 96px;
+    }
+  }
+
+  @media (max-width: 500px) {
+    .pdx-detail {
+      padding: 16px;
+    }
+    .pdx-detail-sprite {
+      flex-direction: column;
+      align-items: center;
+    }
+  }
+
+  /* DEXDECK GAME-INCLUSIVE MOTION */
+  .pdx-row-interactive {
+    transform-origin: center;
+    transition: transform 190ms cubic-bezier(.2, .75, .25, 1), border-color 190ms ease, background-color 190ms ease, box-shadow 190ms ease;
+  }
+
+  .pdx-row-interactive:hover,
+  .pdx-row-interactive:focus-within {
+    z-index: 2;
+    transform: translateY(-1px) scale(1.012);
+    border-color: color-mix(in srgb, var(--enc-accent) 38%, var(--enc-border));
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .13);
+  }
+
+  .pdx-row-interactive .pdx-sprite,
+  .pdx-row-interactive .pdx-sprite img {
+    transition: transform 220ms cubic-bezier(.2, .75, .25, 1);
+  }
+
+  .pdx-row-interactive:hover .pdx-sprite { transform: scale(1.05); }
+  .pdx-row-interactive:hover .pdx-sprite img { transform: scale(1.08) rotate(-3deg); }
+  .pdx-row-interactive .pdx-icon-button { transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease; }
+  .pdx-row-interactive .pdx-icon-button:hover { transform: translateY(-1px) scale(1.06); }
+  .pdx-row-interactive .pdx-icon-button:active { transform: scale(.94); }
+
+  @media (max-width: 760px) {
+    .pdx-row-interactive:hover, .pdx-row-interactive:focus-within { transform: translateY(-1px); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pdx-row-interactive, .pdx-row-interactive .pdx-sprite,
+    .pdx-row-interactive .pdx-sprite img, .pdx-row-interactive .pdx-icon-button {
+      animation: none !important; transition: none !important; transform: none !important;
+    }
   }
 </style>

@@ -1,9 +1,11 @@
+import { appendGameExclusiveEntries, getPokedexGames, isExclusiveToOtherGame, suggestPokedexGameKey } from '$lib/import/game-pokedex';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { retryDelay, shouldRetry } from '$lib/import/http-policy';
 import { mapWithConcurrency } from '$lib/import/concurrency';
 import { parsePokemonFile } from '$lib/import/pokemon-import';
 import type { GamePokemon } from '$lib/pokedex';
+import { remainingPreviewRows, safeSpriteSource, spriteFallbackName, visiblePreviewRows } from '$lib/pokedex-preview';
 
 test('reintenta en 429 y 5xx, no en 404', () => {
   assert.equal(shouldRetry(429), true);
@@ -108,6 +110,9 @@ test('sugiere la Pokedex por nombre de juego', () => {
   assert.equal(suggestPokedexKey('Pokémon Rojo Fuego', ''), 'kanto');
   assert.equal(suggestPokedexKey('Pokemon Esmeralda', '3.0'), 'hoenn');
   assert.equal(suggestPokedexKey('Pokemon Insurgence', '1.2'), '');
+  assert.equal(suggestPokedexKey('Pokémon X', ''), 'kalos');
+  assert.equal(suggestPokedexKey('Pokémon Y', ''), 'kalos');
+  assert.equal(suggestPokedexKey('Pokémon Xtreme', ''), '');
 });
 
 test('lee las entradas de la Pokedex', () => {
@@ -139,12 +144,106 @@ test('convierte la lista de Pokedex en opciones ordenadas', () => {
     results: [
       { name: 'hoenn', url: 'h' },
       { name: 'kanto', url: 'k' },
-      { name: 'rara', url: 'r' }
+      { name: 'rara', url: 'r' },
+      { name: 'original-johto', url: 'j' }
     ]
   });
 
-  assert.deepEqual(options.map((option) => option.key), ['kanto', 'hoenn', 'rara']);
+  assert.deepEqual(options.map((option) => option.key), ['kanto', 'original-johto', 'hoenn']);
   assert.equal(options[0].label, 'Kanto');
+});
+
+test('ofrece únicamente las diez regiones principales en orden', () => {
+  const options = parsePokedexOptions({
+    results: [
+      { name: 'blueberry', url: 'bb' },
+      { name: 'paldea', url: 'p' },
+      { name: 'updated-kanto', url: 'uk' },
+      { name: 'hisui', url: 'h' },
+      { name: 'kalos-mountain', url: 'km' },
+      { name: 'original-johto', url: 'oj' },
+      { name: 'kanto', url: 'k' },
+      { name: 'isle-of-armor', url: 'ia' },
+      { name: 'hoenn', url: 'ho' },
+      { name: 'sinnoh', url: 's' },
+      { name: 'updated-alola', url: 'ua' },
+      { name: 'kalos-central', url: 'kc' },
+      { name: 'national', url: 'n' },
+      { name: 'galar', url: 'g' },
+      { name: 'unova', url: 'u' },
+      { name: 'kalos-coastal', url: 'kco' },
+      { name: 'original-alola', url: 'oa' },
+      { name: 'conquest-gallery', url: 'cg' },
+      { name: 'kitakami', url: 'ki' }
+    ]
+  });
+
+  assert.deepEqual(options.map((option) => option.key), [
+    'kanto', 'original-johto', 'hoenn', 'sinnoh', 'unova',
+    'kalos', 'original-alola', 'galar', 'hisui', 'paldea'
+  ]);
+  assert.deepEqual(options.map((option) => option.label), [
+    'Kanto', 'Johto', 'Hoenn', 'Sinnoh', 'Teselia',
+    'Kalos', 'Alola', 'Galar', 'Hisui', 'Paldea'
+  ]);
+});
+
+test('recopila las tres Pokédex de Kalos, mantiene el orden y deduplica especies', async () => {
+  const requested: string[] = [];
+  const regional = {
+    'kalos-central': [
+      { entry_number: 2, pokemon_species: { name: 'pikachu', url: 'species/25' } },
+      { entry_number: 1, pokemon_species: { name: 'bulbasaur', url: 'species/1' } }
+    ],
+    'kalos-coastal': [
+      { entry_number: 1, pokemon_species: { name: 'bulbasaur', url: 'species/1' } },
+      { entry_number: 2, pokemon_species: { name: 'meowth', url: 'species/52' } }
+    ],
+    'kalos-mountain': [
+      { entry_number: 1, pokemon_species: { name: 'meowth', url: 'species/52' } },
+      { entry_number: 2, pokemon_species: { name: 'zubat', url: 'species/41' } }
+    ]
+  };
+  const fetchJson = async (url: string): Promise<unknown> => {
+    requested.push(url);
+    const region = Object.keys(regional).find((key) => url.endsWith(`/pokedex/${key}`));
+    if (region) return { pokemon_entries: regional[region as keyof typeof regional] };
+    const speciesMatch = url.match(/species\/(\d+)$/);
+    if (speciesMatch) return { id: Number(speciesMatch[1]), names: [], flavor_text_entries: [] };
+    const pokemonMatch = url.match(/pokemon\/(\d+)$/);
+    if (pokemonMatch) return { id: Number(pokemonMatch[1]), types: [], abilities: [], stats: [], sprites: {} };
+    throw new Error(`URL de prueba inesperada: ${url}`);
+  };
+
+  const result = await collectPokedex({ pokedexKey: 'kalos', fetchJson });
+  assert.deepEqual(requested.slice(0, 3), [
+    'https://pokeapi.co/api/v2/pokedex/kalos-central',
+    'https://pokeapi.co/api/v2/pokedex/kalos-coastal',
+    'https://pokeapi.co/api/v2/pokedex/kalos-mountain'
+  ]);
+  assert.equal(requested.filter((url) => url.includes('species/')).length, 4);
+  assert.deepEqual(result.records.map((row) => row.record.name), ['Bulbasaur', 'Pikachu', 'Meowth', 'Zubat']);
+  assert.deepEqual(result.records.map((row) => row.record.dex_number), ['1', '2', '3', '4']);
+  assert.deepEqual(result.records.map((row) => row.record.national_dex_number), ['1', '25', '52', '41']);
+  assert.equal(result.issues.length, 0);
+});
+
+test('limita la previsualización a 15 filas e indica las restantes', () => {
+  const rows = Array.from({ length: 18 }, (_, index) => index);
+  assert.equal(visiblePreviewRows(rows).length, 15);
+  assert.equal(remainingPreviewRows(rows), 3);
+  assert.equal(remainingPreviewRows(rows.slice(0, 15)), 0);
+});
+
+test('previsualización acepta rutas locales y URL HTTPS, rechaza fuentes inseguras y tolera sprite vacío', () => {
+  assert.equal(safeSpriteSource({ sprite_path: 'sprites/025.png' }), 'sprites/025.png');
+  assert.equal(safeSpriteSource({ sprite_url: 'https://img.example.test/pikachu.png' }), 'https://img.example.test/pikachu.png');
+  assert.equal(safeSpriteSource({ sprite_url: 'http://img.example.test/pikachu.png' }), '');
+  assert.equal(safeSpriteSource({ sprite_url: 'javascript:alert(1)' }), '');
+  assert.equal(safeSpriteSource({ sprite_path: '//evil.test/p.png' }), '');
+  assert.equal(safeSpriteSource({}), '');
+  assert.equal(spriteFallbackName(''), '?');
+  assert.equal(spriteFallbackName(undefined), '?');
 });
 
 test('prefiere español y cae al inglés', () => {
@@ -326,4 +425,123 @@ test('tras tres fallos lanza un mensaje en español', async () => {
 
   const fetchJson = createFetchJson(request, 50);
   await assert.rejects(fetchJson('https://pokeapi.co/x'), /No se ha podido consultar/);
+});
+
+
+test('sugiere únicamente una región para juegos de distintas generaciones', () => {
+  const cases: Array<[string, string]> = [
+    ['Pokémon Rojo Fuego', 'kanto'],
+    ['Pokémon Oro HeartGold', 'original-johto'],
+    ['Pokémon Esmeralda', 'hoenn'],
+    ['Pokémon Diamante', 'sinnoh'],
+    ['Pokémon Negro 2', 'unova'],
+    ['Pokémon X', 'kalos'],
+    ['Pokémon Ultraluna', 'original-alola'],
+    ['Pokémon Espada', 'galar'],
+    ['Leyendas Pokémon Arceus', 'hisui'],
+    ['Pokémon Púrpura', 'paldea']
+  ];
+
+  for (const [game, expected] of cases) {
+    assert.equal(suggestPokedexKey(game, ''), expected, game);
+  }
+  assert.equal(suggestPokedexKey('Pokémon Xtreme', ''), '');
+});
+
+test('cada opción regional utiliza su identificador canónico de PokéAPI', async () => {
+  const keys = [
+    'kanto', 'original-johto', 'hoenn', 'sinnoh', 'unova',
+    'kalos', 'original-alola', 'galar', 'hisui', 'paldea'
+  ];
+
+  for (const key of keys) {
+    const requested: string[] = [];
+    await collectPokedex({
+      pokedexKey: key,
+      fetchJson: async (url) => {
+        requested.push(url);
+        return { pokemon_entries: [] };
+      }
+    });
+
+    if (key === 'kalos') {
+      assert.deepEqual(requested, [
+        'https://pokeapi.co/api/v2/pokedex/kalos-central',
+        'https://pokeapi.co/api/v2/pokedex/kalos-coastal',
+        'https://pokeapi.co/api/v2/pokedex/kalos-mountain'
+      ]);
+    } else {
+      assert.deepEqual(requested, ['https://pokeapi.co/api/v2/pokedex/' + key]);
+    }
+  }
+});
+
+
+test('ofrece ediciones según la región elegida', () => {
+  assert.deepEqual(getPokedexGames('kanto').map((game) => game.key), ['red', 'blue', 'yellow', 'firered', 'leafgreen', 'lets-go-pikachu', 'lets-go-eevee']);
+  assert.deepEqual(getPokedexGames('paldea').map((game) => game.key), ['scarlet', 'violet']);
+  for (const region of ['kanto', 'original-johto', 'hoenn', 'sinnoh', 'unova', 'kalos', 'original-alola', 'galar', 'hisui', 'paldea']) {
+    assert.ok(getPokedexGames(region).length > 0, 'Faltan juegos para ' + region);
+  }
+  assert.equal(suggestPokedexGameKey('Pokémon Rojo Fuego', '', 'kanto'), 'firered');
+  assert.equal(suggestPokedexGameKey('Pokémon Púrpura', '', 'paldea'), 'violet');
+  assert.deepEqual(getPokedexGames('original-johto').map((game) => game.key), ['gold', 'silver', 'crystal', 'heartgold', 'soulsilver']);
+  assert.ok(appendGameExclusiveEntries([], 'heartgold').entries.some((entry) => entry.speciesKey === 'omanyte'));
+  assert.ok(appendGameExclusiveEntries([], 'soulsilver').entries.some((entry) => entry.speciesKey === 'kabuto'));
+  assert.equal(isExclusiveToOtherGame('firered', 'sandshrew'), true);
+  assert.equal(isExclusiveToOtherGame('firered', 'ekans'), false);
+  assert.equal(isExclusiveToOtherGame('leafgreen', 'ekans'), true);
+  assert.equal(isExclusiveToOtherGame('scarlet', 'misdreavus'), true);
+  assert.equal(isExclusiveToOtherGame('violet', 'great-tusk'), true);
+  assert.deepEqual(getPokedexGames('hoenn').map((game) => game.key), ['ruby', 'sapphire', 'emerald', 'omega-ruby', 'alpha-sapphire']);
+  assert.deepEqual(getPokedexGames('sinnoh').map((game) => game.key).slice(0, 3), ['diamond', 'pearl', 'platinum']);
+  assert.deepEqual(getPokedexGames('unova').map((game) => game.key), ['black', 'white', 'black-2', 'white-2']);
+  assert.deepEqual(getPokedexGames('original-alola').map((game) => game.key), ['sun', 'moon', 'ultra-sun', 'ultra-moon']);
+  assert.equal(getPokedexGames('hisui')[0]?.key, 'legends-arceus');
+  assert.deepEqual(getPokedexGames('unknown'), []);
+});
+
+test('une exclusivos a la Pokédex regional sin duplicar especies', () => {
+  const regional = [
+    { entryNumber: 1, speciesKey: 'ekans', speciesUrl: 'https://pokeapi.co/api/v2/pokemon-species/ekans/' },
+    { entryNumber: 2, speciesKey: 'bulbasaur', speciesUrl: 'https://pokeapi.co/api/v2/pokemon-species/bulbasaur/' }
+  ];
+  const result = appendGameExclusiveEntries(regional, 'firered');
+  assert.ok(result.added > 0);
+  assert.equal(result.entries.filter((entry) => entry.speciesKey === 'ekans').length, 1);
+  assert.ok(result.entries.some((entry) => entry.speciesKey === 'scizor'));
+  assert.equal(result.entries[2].entryNumber, 3);
+});
+
+test('la unión de Paldea incorpora exclusivos de ambas ediciones', () => {
+  const scarlet = appendGameExclusiveEntries([], 'scarlet');
+  const violet = appendGameExclusiveEntries([], 'violet');
+  assert.ok(scarlet.entries.some((entry) => entry.speciesKey === 'great-tusk'));
+  assert.ok(violet.entries.some((entry) => entry.speciesKey === 'iron-valiant'));
+  assert.equal(scarlet.entries.some((entry) => entry.speciesKey === 'iron-valiant'), false);
+  assert.equal(violet.entries.some((entry) => entry.speciesKey === 'great-tusk'), false);
+});
+
+test('collectPokedex importa extras de la edición y cuenta solo los descargados', async () => {
+  const fetchJson = async (url: string): Promise<unknown> => {
+    if (url.endsWith('/pokedex/kanto')) return { pokemon_entries: [] };
+    if (url.endsWith('/pokemon-species/ekans/')) {
+      return { id: 23, names: [{ name: 'Ekans', language: { name: 'en' } }], flavor_text_entries: [] };
+    }
+    if (url.endsWith('/pokemon/23')) {
+      return { id: 23, types: [], abilities: [], stats: [], sprites: {} };
+    }
+    throw new Error('URL inesperada en la prueba: ' + url);
+  };
+
+  const result = await collectPokedex({
+    pokedexKey: 'kanto',
+    gameKey: 'firered',
+    maxEntries: 1,
+    fetchJson
+  });
+
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].record.species_key, 'pokeapi:ekans');
+  assert.equal(result.exclusiveAdded, 1);
 });

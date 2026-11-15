@@ -63,33 +63,34 @@ The goal is for DexDeck to let users discover a game, learn everything about it,
 
 ## 🧭 Project status
 
-DexDeck is at an early stage of development (`0.1.0`). The personal library already provides working management features and can launch Windows executables through Wine. The Encyclopedia has its first catalogue and database structure integrated; its Pokédex, world and guides sections still need functional implementation.
+DexDeck is under active development (`0.1.0`). The desktop application, personal library and Encyclopedia catalogue now have a functional foundation. The per-game and per-version Pokédex supports entry management, file imports and PokéAPI collection with a review step.
 
 | Area | Status | Current situation |
 |---|---|---|
-| Desktop application | ✅ Foundation implemented | Tauri 2 + Svelte 5 |
-| Personal library | ✅ Functional | Add, edit, search, view and hide entries |
-| `.exe` launching | ✅ Implemented | Launches through Wine |
-| Metadata detection | ✅ Implemented | Folders and PE metadata from Windows executables |
-| Light and dark themes | ✅ Implemented | Persistent preference |
-| Liquid Glass | 🧪 Evolving | Pearl v2 design prepared; installation and final build still need validation |
-| Encyclopedia: catalogue | 🧱 First version | Listing, filters, search and entry creation |
-| Game versions | 🧱 First version | Initial creation and version selector |
-| Per-version Pokédex | 🗺️ Structure prepared | Tables and initial screen; data management and importing are still missing |
-| Regions and locations | 🗺️ Structure prepared | Data model; interface and content are still missing |
-| Encounters and items | 🗺️ Structure prepared | Data model; interface and content are still missing |
-| Maps and guides | 🗺️ Structure prepared | Data model; functional editor and viewer are still missing |
-| Offline synchronization and cache | 🚧 Planned | Not implemented yet |
-| ROM and emulator launchers | 🚧 Planned | Adapters still pending |
-| Update centre | ✅ Functional | Checks and installs updates via the Tauri updater plugin |
+| Desktop application | ✅ Implemented | Tauri 2 + Svelte 5 + TypeScript + Rust |
+| Personal library | ✅ Functional | Entry management, search, configuration and `.exe` launching through Wine |
+| Metadata detection | ✅ Implemented | Folder names and Windows executable PE metadata |
+| Themes and visual experience | ✅ Implemented | Light, dark and Liquid Glass themes; transitions and hover states |
+| Encyclopedia catalogue | ✅ Functional | Independent catalogue, filters, search, create, edit and delete |
+| Game versions | ✅ Functional | Multiple versions per entry, editing, selection and default version |
+| Sources and attribution | ✅ Implemented | Registered sources and attribution for imported data |
+| Per-version Pokédex | ✅ Functional | Search, sorting, details, create, edit and delete |
+| Local imports | ✅ Functional | CSV/JSON, validation, duplicate detection and preview |
+| PokéAPI collection | ✅ Functional | Localized data, progress, cancellation, preview and attribution |
+| Regional Pokédex | ✅ Functional | Ten regions: Kanto, Johto, Hoenn, Sinnoh, Unova (Teselia), Kalos, Alola, Galar, Hisui and Paldea |
+| Game-version differences | ✅ First version | Region-dependent game selector, regional roster plus edition exclusives and availability flags |
+| Navigation and dialogs | ✅ Improved | Back/forward history and centralized dialog scroll locking |
+| Pokédex micro-interactions | ✅ Implemented | Subtle row, sprite and control effects; respects reduced motion |
+| Regions, locations and encounters | 🧱 Database foundation | Functional interface and content are still pending |
+| Maps and guides | 🧱 Database foundation | Editor, viewer and content are still pending |
+| Offline cache and synchronization | 🚧 Planned | Not implemented yet |
+| ROM and emulator launchers | 🚧 Planned | Adapters are still pending |
 
-**Legend:** ✅ implemented · 🧱 first version or foundations integrated · 🚧 pending · 🧪 requires validation.
+**Legend:** ✅ implemented · 🧱 foundations integrated · 🚧 pending.
 
-### Latest known check
+### Checks before publishing
 
-- Checked on 2026-11-14 with the WebdriverIO harness in place: `pnpm check` **0 errors and 0 warnings** (including WDIO test types), `pnpm test:import` **20/20**, `pnpm test:ui` **3 specs / 7 tests** in Chromium with a mocked backend, and `cargo check` with and without the `wdio` feature.
-- The final validation of the Liquid Glass v2 visual package is still pending: checks must be run again after installing any style updates.
-- A feature is not considered complete just because its table, TypeScript type or visual tab exists: it must also have operations, an interface and sufficient tests.
+The publishing script runs `pnpm check`, `pnpm test:import`, `pnpm build`, `pnpm test:ui`, `cargo check` and `git diff --check`. Exact results are printed in the terminal so the documentation does not retain stale test counts.
 
 ---
 
@@ -136,25 +137,39 @@ Transitions, entrance animations, hover states, configuration indicators, respon
 
 Liquid Glass is still undergoing visual refinement. Actual transparency and blur depend on the Tauri WebView, window composition and the operating system's compositor.
 
-### 4. Encyclopedia: first integrated structure
+### 4. Encyclopedia: catalogue and per-version content
 
 The Encyclopedia is separate from the personal library. A game can be documented in the catalogue even if it is not installed on the computer.
 
-The first version includes:
+It includes:
 
-- Its own section in the navigation.
-- An independent catalogue.
-- Filters for official games, fangames and ROM hacks.
-- Search by name, developer and description.
-- Creation of a catalogue entry.
-- Creation of an initial version linked to the game.
-- Viewing an entry and selecting a version.
-- A summary of the amounts of data recorded for each version.
-- Summary, Pokédex, World and Guides tabs, which are still at an early stage.
+- An independent catalogue with filters for official games, fangames and ROM hacks.
+- Search and entry management: create, edit and delete with confirmation.
+- Multiple versions per game, including platform, notes and a default version.
+- Data sources, licences and attribution.
+- Optional links between a catalogue entry and an installation in the personal library.
+- A summary of the data associated with each version.
+- Summary, Pokédex, World and Guides tabs. World and Guides still need further functional work.
 
-Sections displaying messages such as “there are no Pokémon registered yet” are initial interface states. They do not represent a complete Pokédex or imported data.
+#### Pokédex for each game and version
 
----
+Each version has its own Pokédex. Entries can be created, edited and deleted; users can search by number or name, sort results and open detailed entries. Records support forms, types, abilities, base stats, descriptions, sprites, national number, source information and an availability flag.
+
+The Pokédex supports local CSV/JSON imports and collection from PokéAPI. Both workflows show a preview before saving and let users review new entries, updates, duplicates and errors.
+
+#### Regional Pokédex and game editions
+
+The PokéAPI selector offers exactly ten regions: Kanto, Johto, Hoenn, Sinnoh, Unova (Teselia), Kalos, Alola, Galar, Hisui and Paldea. Kalos's three regional Pokédex lists are combined into one option.
+
+After choosing a region, users can select a compatible game edition. Collection combines the complete regional Pokédex with species exclusive to the selected edition, removes duplicates and preserves regional species even when they cannot be obtained in that edition. Such entries can be marked as “Not obtainable”. Additional exclusives are added without replacing the regional roster.
+
+Version exclusivity is currently tracked at species level; differences limited to forms or special variants may need further coverage.
+
+#### Navigation and interaction details
+
+Encyclopedia navigation maintains back/forward history and supports common keyboard shortcuts and mouse side buttons. Dialog scroll locking is centralized so the page behind a modal does not scroll while it is open.
+
+The Pokédex includes restrained micro-interactions: rows subtly highlight and expand on hover, sprites move slightly, and controls and dialogs use smooth transitions. The interface respects `prefers-reduced-motion`.
 
 ## 🏗️ Architecture and technologies
 
@@ -260,18 +275,22 @@ The roadmap is ordered by dependencies. The data model is consolidated first, fo
 
 ### Phase 3 — Pokédex for each game and version
 
-- [ ] Pokémon list with search, filters and sorting.
-- [ ] National Pokédex number and local Pokédex number.
-- [ ] Sprites, names, types and forms.
-- [ ] Abilities and base stats.
-- [ ] Pokédex descriptions.
+- [x] Pokémon list with search, sorting and entry count.
+- [x] Per-version records with local and national Pokédex numbers.
+- [x] Sprites, names, types and forms.
+- [x] Abilities, base stats and descriptions.
+- [x] Create, edit, delete and mark Pokémon as obtainable.
+- [x] CSV/JSON imports with validation, preview and duplicate detection.
+- [x] PokéAPI collection with progress, cancellation, localization and attribution.
+- [x] Selector for the ten main regions, with Kalos's three sub-dexes combined.
+- [x] Region-dependent game-edition selector.
+- [x] Regional Pokédex plus edition-exclusive species, without duplicates and while retaining the regional roster.
 - [ ] Evolutions and evolution methods.
 - [ ] Moves and learning methods.
-- [ ] Availability and version exclusivity.
-- [ ] Management of Fakémon and custom species.
-- [ ] Tools to import and review data.
+- [ ] Complete coverage of form and variant exclusives.
+- [ ] Dedicated editor and tools for large Fakémon Pokédexes.
 
-**Completion criteria:** a version can have a complete Pokédex, independent of other versions of the same game.
+**Completion criteria:** each version can have a complete Pokédex, independent of other versions of the same game.
 
 ### Phase 4 — World, regions and maps
 
@@ -311,10 +330,12 @@ The roadmap is ordered by dependencies. The data model is consolidated first, fo
 
 ### Phase 7 — Sources, importing and synchronization
 
-- [ ] Integration with official and community data sources.
-- [ ] Import from structured formats.
-- [ ] Validation and duplicate detection.
-- [ ] Visible attribution and licence preservation.
+- [x] Data-source registry, attribution and licence metadata.
+- [x] CSV and JSON imports.
+- [x] Validation, preview, duplicate detection and insert-only mode.
+- [x] Direct PokéAPI collection for regional Pokédex lists and supported game editions.
+- [x] Preserve `source_url`, species key and national number in imported records.
+- [ ] Additional community sources for fangame-specific content.
 - [ ] Local cache for data and images.
 - [ ] Incremental synchronization when a connection is available.
 - [ ] Conflict and synchronization error resolution.
@@ -400,7 +421,23 @@ To start or build the application, check the scripts available in `package.json`
 
 DexDeck may combine data from APIs, official sources, community documentation and manually entered information. Each source must be reviewed before integration, especially regarding licensing, attribution, usage limits and redistribution terms.
 
-PokéAPI may be useful as a source for some official-game data, but it does not cover the specific content of fangames and ROM hacks on its own. Custom data will require its own editing and importing tools.
+### Pokédex imports and PokéAPI collection
+
+The **Collect from PokéAPI** action retrieves data for a version's Pokédex. Before anything is saved, DexDeck shows a preview with new entries, updates, unchanged records and potential errors.
+
+- The selector displays ten regions: Kanto, Johto, Hoenn, Sinnoh, Unova (Teselia), Kalos, Alola, Galar, Hisui and Paldea.
+- Kalos combines its Central, Coastal and Mountain Pokédex lists into one selection.
+- A second selector offers the editions supported by the selected region.
+- Collection combines the complete regional Pokédex with species exclusive to the selected edition.
+- Regional species are retained even when they cannot be obtained in that edition; they can be marked as “Not obtainable”.
+- Additional exclusives are added without duplicating species already in the regional roster.
+- Retrieved data includes names, types, abilities, base stats, descriptions and official-artwork URLs. Images are not downloaded; their URLs are stored.
+- Spanish text is preferred, with English used as a fallback when a translation is unavailable.
+- Download progress is shown and the operation can be cancelled; cancellation does not apply any changes.
+- Imported records retain their provenance through the source, `source_url`, species key and national number.
+- The last regional selection is remembered per version to make future collections easier.
+
+Version exclusivity is currently tracked at species level; differences limited to forms or special variants may be expanded later.
 
 DexDeck must not distribute commercial ROMs, BIOS files, firmware or other third-party protected files. Users must provide their own files and comply with applicable law. The application is an independent fan project and is not affiliated with, endorsed by or sponsored by Nintendo, The Pokémon Company or Game Freak.
 
@@ -435,6 +472,18 @@ These ideas are not part of the implemented scope; they are possibilities that f
 ---
 
 ## 🗓️ Progress log
+
+### 15 November 2026 — Regional Pokédex, game editions and UX improvements
+
+- ✅ Regional selector limited to ten main regions; Kalos's three lists are consolidated into one option.
+- ✅ Region-dependent edition selector, with a suggested game based on the Encyclopedia game and version names.
+- ✅ Inclusive collection: complete regional Pokédex plus species exclusive to the selected edition, without duplicates.
+- ✅ Regional species are retained and can be marked as unobtainable in a specific edition.
+- ✅ PokéAPI preview and collection flow refined so data can be reviewed before saving.
+- ✅ Pokédex micro-interactions, row and sprite highlights, subtle transitions and reduced-motion support.
+- ✅ Back/forward navigation history and centralized dialog scroll locking.
+- ✅ Expanded automated coverage for imports, navigation and the Pokédex interface.
+
 
 This section will be updated as new features are implemented and verified. Completed changes, work in progress and pending validation will be recorded separately.
 

@@ -14,7 +14,8 @@ export const selectors = {
     addGame: '[data-testid="nav-anadir-juego"]',
     updates: '[data-testid="nav-actualizaciones"]',
     settings: '[data-testid="nav-ajustes"]',
-    exit: 'button[aria-label="Salir de DexDeck"]'
+    exit: 'button[aria-label="Salir de DexDeck"]',
+    liveRegion: '[aria-live="polite"]'
   },
 
   library: {
@@ -23,6 +24,7 @@ export const selectors = {
     cards: '[data-testid="game-card"]',
     empty: '[data-testid="empty-library"]',
     clearSearch: '[data-testid="empty-library"] button',
+    openCardDetailsByName: (name: string) => `button[aria-label="Ver ficha de ${name}"]`,
     cardByName: (name: string) =>
       `[data-testid="game-card"][data-game-name="${name.replaceAll('"', '\\"')}"]`,
     openDetailsByName: (name: string) => `button[aria-label="Abrir ficha de ${name}"]`,
@@ -43,7 +45,25 @@ export const selectors = {
 
   detail: {
     dialog: '[data-testid="game-details-dialog"]',
-    close: '[data-testid="game-details-dialog"] button[aria-label="Cerrar ficha"]'
+    close: '[data-testid="game-details-dialog"] button[aria-label="Cerrar ficha"]',
+    libraryDialog: '[data-testid="game-detail-dialog"]',
+    libraryClose: '[data-testid="game-detail-dialog"] button[aria-label="Cerrar ficha"]'
+  },
+
+  pokedex: {
+    detailButton: (name: string) => `button[aria-label="Ver detalles de ${name}"]`,
+    clearButton: '.pdx-header-actions > .pdx-danger',
+    clearDialog: '[aria-labelledby="pdx-clear-title"]',
+    clearConfirm: '[aria-labelledby="pdx-clear-title"] .pdx-danger-button',
+    detailDialog: '[aria-labelledby="pdx-detail-title"]',
+    detailClose: '[aria-label="Cerrar ficha"]'
+  },
+
+  encyclopedia: {
+    gameCard: '.enc-game-card',
+    gameBack: '.enc-back-button',
+    pokedexTab: '.enc-tabs button:nth-child(2)',
+    versionSelect: '#enc-version-select'
   },
 
   notice: '[data-testid="notice"]',

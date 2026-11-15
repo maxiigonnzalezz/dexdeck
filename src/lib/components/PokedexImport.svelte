@@ -10,6 +10,7 @@
     type ImportApplyResult
   } from '$lib/import/pokemon-import';
   import PokedexImportPreview from './PokedexImportPreview.svelte';
+  import { scrollLockDialog } from '$lib/scroll-lock';
 
   type Props = {
     versionId: number;
@@ -109,12 +110,14 @@
   let applyLabel = $derived(
     applying ? 'Importando…' : `Importar ${actionable} ${actionable === 1 ? 'entrada' : 'entradas'}`
   );
+
 </script>
 
 <button type="button" class="pdi-trigger" onclick={openDialog}>Importar CSV/JSON</button>
 
 <dialog
   bind:this={dialog}
+  use:scrollLockDialog
   class="pdi-dialog"
   aria-labelledby="pdi-title"
   onclick={(event) => { if (event.target === dialog) closeDialog(); }}

@@ -458,3 +458,31 @@ export async function deleteGamePokemon(pokemonId: number): Promise<void> {
   const db = await getDatabase();
   await db.execute('DELETE FROM game_pokemon WHERE id = $1', [pokemonId]);
 }
+
+/** Elimina todas las entradas de Pokédex de una versión concreta. */
+export async function clearGamePokemon(versionId: number): Promise<number> {
+  const db = await getDatabase();
+
+  if (!Number.isSafeInteger(versionId) || versionId <= 0) {
+    throw new Error('La versión seleccionada no es válida.');
+  }
+
+  const existing = await db.select<Array<{ total: number }>>(
+    'SELECT COUNT(*) AS total FROM game_versions WHERE id = $1',
+    [versionId]
+  );
+
+  if ((existing[0]?.total ?? 0) === 0) {
+    throw new Error('La versión ya no existe.');
+  }
+
+  // Cada llamada del plugin SQL ejecuta una consulta a través del pool. Un
+  // BEGIN/COMMIT en llamadas separadas no garantiza que usen la misma conexión;
+  // una única sentencia DELETE es atómica y ON DELETE CASCADE limpia encuentros.
+  const result = await db.execute(
+    'DELETE FROM game_pokemon WHERE game_version_id = $1',
+    [versionId]
+  );
+
+  return result.rowsAffected;
+}

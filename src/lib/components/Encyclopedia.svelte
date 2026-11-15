@@ -30,9 +30,20 @@
   } from '$lib/encyclopedia';
   import PokedexView from '$lib/components/PokedexView.svelte';
   import { onMount } from 'svelte';
+  import { acquireScrollLock } from '$lib/scroll-lock';
 
   type CategoryFilter = 'all' | CatalogGameType;
   type DetailTab = 'overview' | 'pokedex' | 'world' | 'guides';
+
+  type Props = {
+    /** Llamado cuando el usuario abre la ficha de un juego, para registrar en el historial. */
+    onGameOpen?: (gameId: number, gameName: string) => void;
+    onGameClose?: () => void;
+    /** ID del juego a restaurar al navegar hacia atrás/adelante. Null = vista de catálogo. */
+    restoreGameId?: number | null;
+  };
+
+  let { onGameOpen, onGameClose, restoreGameId = null }: Props = $props();
 
   let games = $state<CatalogGame[]>([]);
   let loading = $state(true);
@@ -294,7 +305,7 @@
     }
   }
 
-  async function openGame(game: CatalogGame) {
+  async function openGame(game: CatalogGame, pushToHistory = true) {
     selectedGame = game;
     pageError = '';
     detailTab = 'overview';
@@ -309,6 +320,10 @@
     versions = [];
     selectedVersionId = null;
     summary = null;
+
+    if (pushToHistory) {
+      onGameOpen?.(game.id, game.name);
+    }
 
     try {
       versions = await listCatalogGameVersions(game.id);
@@ -649,12 +664,33 @@
     };
     return labels[platform] ?? platform.toUpperCase();
   }
+
+  // Bloquear el scroll del fondo cuando cualquier modal de la Enciclopedia esté abierto.
+  $effect(() => {
+    const isOpen = showForm || showDeleteConfirm || showLinkDialog || showSourceManager || showVersionManager;
+    if (!isOpen) return;
+    return acquireScrollLock();
+  });
+
+  // Restaurar la ficha de un juego cuando el historial de navegación lo indique.
+  $effect(() => {
+    const id = restoreGameId;
+    if (id === null || id === undefined) {
+      // El historial retrocedió a la vista de catálogo
+      selectedGame = null;
+      return;
+    }
+    // Sólo restaurar si el juego no está ya abierto
+    if (selectedGame?.id === id) return;
+    const game = games.find((g) => g.id === id);
+    if (game) void openGame(game, false);
+  });
 </script>
 
 <section class="encyclopedia">
   {#if selectedGame}
     <div class="enc-detail-topline">
-      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; showDeleteConfirm = false; deleteInfo = null; deleteError = ''; showLinkDialog = false; links = []; }}>
+      <button class="enc-back-button" type="button" onclick={() => { selectedGame = null; pageError = ''; showDeleteConfirm = false; deleteInfo = null; deleteError = ''; showLinkDialog = false; links = []; onGameClose?.(); }}>
         <span aria-hidden="true">←</span> Volver al catálogo
       </button>
       <span class="enc-kicker">FICHA DE JUEGO</span>

@@ -26,12 +26,25 @@
   import { attachConsole, info } from '@tauri-apps/plugin-log';
   import { onMount } from 'svelte';
   import { isWebUrl } from '$lib/url';
+  import { scrollLockDialog } from '$lib/scroll-lock';
+  import { NavigationManager } from '$lib/navigation.svelte';
 
-  let activeSection = $state('Biblioteca');
+  // ---- Gestión del historial de navegación ----
+  const navManager = new NavigationManager();
+
+  let activeSection = $derived(navManager.current.section);
   let search = $state('');
   let addDialog: HTMLDialogElement | undefined = $state(undefined);
   let detailDialog: HTMLDialogElement | undefined = $state(undefined);
+  let detailGame = $state<Game | null>(null);
   let selectedGame = $state<Game | null>(null);
+
+  // ID del juego de Enciclopedia a restaurar al navegar con historial
+  let encyclopediaRestoreGameId = $derived(
+    navManager.current.section === 'Enciclopedia' && navManager.current.subView === 'game'
+      ? Number(navManager.current.params?.gameId)
+      : null
+  );
   let gameDialog = $state<HTMLDialogElement | undefined>(undefined);
   let showRemoveConfirm = $state(false);
   let editingGameId = $state<number | null>(null);
@@ -63,6 +76,65 @@
   let theme = $state<ThemeName>('dark');
   let launchingGameId = $state<number | null>(null);
   let systemInfo = $state<SystemInfo | null>(null);
+
+  function navigateBack() {
+    if (navManager.back()) {
+      search = '';
+      notice = '';
+    }
+  }
+
+  function navigateForward() {
+    if (navManager.forward()) {
+      search = '';
+      notice = '';
+    }
+  }
+
+  function isTextEntry(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && (
+      target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(target.tagName) ||
+      Boolean(target.closest('dialog'))
+    );
+  }
+
+  let mouseListener: (() => void) | undefined;
+
+  function setupMouseNavigation() {
+    const handler = (event: MouseEvent) => {
+      // Solo botones laterales del ratón: 3 = atrás, 4 = adelante
+      if (event.button !== 3 && event.button !== 4) return;
+
+      // No interferir con elementos interactivos
+      if (isTextEntry(event.target)) return;
+
+      if (event.button === 3) {
+        event.preventDefault();
+        navigateBack();
+      } else if (event.button === 4) {
+        event.preventDefault();
+        navigateForward();
+      }
+    };
+
+    const keyHandler = (event: KeyboardEvent) => {
+      if (!event.altKey || isTextEntry(event.target)) return;
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        navigateBack();
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        navigateForward();
+      }
+    };
+
+    window.addEventListener('mousedown', handler);
+    window.addEventListener('keydown', keyHandler);
+    mouseListener = () => {
+      window.removeEventListener('mousedown', handler);
+      window.removeEventListener('keydown', keyHandler);
+    };
+  }
 
   let appVersion = $state('0.1.0');
   let installationInfo = $state<InstallationInfo | null>(null);
@@ -98,8 +170,10 @@
     void loadGames();
     void loadSystemInfo();
     void loadMaintenanceInfo();
+    setupMouseNavigation();
     return () => {
       detachLogConsole?.();
+      mouseListener?.();
     };
   });
 
@@ -264,9 +338,14 @@
       return;
     }
 
-    activeSection = section;
     search = '';
     notice = '';
+    if (['Biblioteca', 'Enciclopedia', 'Actualizaciones', 'Ajustes'].includes(section)) {
+      navManager.push({
+        section: section as 'Biblioteca' | 'Enciclopedia' | 'Actualizaciones' | 'Ajustes',
+        announcement: `Sección ${section}`
+      });
+    }
   }
 
   function resetForm() {
@@ -299,7 +378,7 @@
   }
 
   function openDetails(game: Game) {
-    selectedGame = game;
+    detailGame = game;
 
     if (detailDialog && !detailDialog.open) {
       detailDialog.showModal();
@@ -308,6 +387,7 @@
 
   function editGame(game: Game) {
     detailDialog?.close();
+    detailGame = null;
     resetForm();
 
     editingGameId = game.id;
@@ -624,7 +704,7 @@
       await loadGames();
 
       addDialog?.close();
-      activeSection = 'Biblioteca';
+      navManager.push({ section: 'Biblioteca', announcement: 'Sección Biblioteca' });
       search = '';
       resetForm();
     } catch (error) {
@@ -683,26 +763,6 @@
     }
   });
 
-  // Bloquea el scroll de la página y restaura tanto los estilos como la posición al cerrar.
-  $effect(() => {
-    if (!selectedGame) return;
-
-    const body = document.body;
-    const html = document.documentElement;
-    const previousBodyOverflow = body.style.overflow;
-    const previousHtmlOverflow = html.style.overflow;
-    const scrollY = window.scrollY;
-
-    body.style.overflow = 'hidden';
-    html.style.overflow = 'hidden';
-
-    return () => {
-      body.style.overflow = previousBodyOverflow;
-      html.style.overflow = previousHtmlOverflow;
-      window.scrollTo(0, scrollY);
-    };
-  });
-
   function openGameDetails(game: Game) {
     showRemoveConfirm = false;
     selectedGame = game;
@@ -740,6 +800,12 @@ async function removeSelectedGame() {
     notice = `El lanzamiento de ${gameName} estará disponible cuando configuremos sus archivos.`;
   }
 
+  // Exponer funciones de navegación para pruebas de interfaz (WDIO)
+  if (import.meta.env.VITE_WDIO === '1') {
+    (window as unknown as { __dexdeck_navigateBack?: () => void; __dexdeck_navigateForward?: () => void }).__dexdeck_navigateBack = navigateBack;
+    (window as unknown as { __dexdeck_navigateBack?: () => void; __dexdeck_navigateForward?: () => void }).__dexdeck_navigateForward = navigateForward;
+  }
+
 </script>
 
 <svelte:head>
@@ -752,6 +818,7 @@ async function removeSelectedGame() {
 </svelte:head>
 
 <div class="app-shell" data-theme={theme} data-testid="app-shell">
+  <div aria-live="polite" aria-atomic="true" class="sr-only">{navManager.announcement}</div>
   <aside class="sidebar">
     <a class="brand" href="#inicio" onclick={() => navigate('Biblioteca')}>
       <div class="brand-mark"><span class="brand-core"></span></div>
@@ -858,7 +925,20 @@ async function removeSelectedGame() {
           onEdit={editGame}
         />
       {:else if activeSection === 'Enciclopedia'}
-        <Encyclopedia />
+        <Encyclopedia
+          onGameOpen={(gameId, gameName) => navManager.push({
+            section: 'Enciclopedia',
+            subView: 'game',
+            params: { gameId, gameName },
+            announcement: `Enciclopedia: ${gameName}`
+          })}
+          onGameClose={() => {
+            if (navManager.current.section === 'Enciclopedia' && navManager.current.subView === 'game') {
+              navigateBack();
+            }
+          }}
+          restoreGameId={encyclopediaRestoreGameId}
+        />
       {:else if activeSection === 'Actualizaciones'}
         <UpdatesView
           {appVersion}
@@ -894,6 +974,7 @@ async function removeSelectedGame() {
 <!-- Modal para añadir y editar fichas -->
 <dialog
   bind:this={addDialog}
+  use:scrollLockDialog
   class="modal"
   aria-labelledby="modal-title"
   onclick={(event) => {
@@ -1025,39 +1106,41 @@ async function removeSelectedGame() {
 <!-- Ficha de consulta -->
 <dialog
   bind:this={detailDialog}
+  use:scrollLockDialog
   class="modal detail-modal"
   data-testid="game-detail-dialog"
   aria-labelledby="detail-title"
+  onclose={() => (detailGame = null)}
   onclick={(event) => {
     if (event.target === detailDialog) detailDialog?.close();
   }}
 >
-  {#if selectedGame}
+  {#if detailGame}
     <div class="modal-top">
       <div class="modal-icon">◇</div>
       <button class="modal-close" aria-label="Cerrar ficha" onclick={() => detailDialog?.close()}>×</button>
     </div>
 
     <div class="section-kicker">DEXDECK COLLECTION · FICHA DEL JUEGO</div>
-    <h2 id="detail-title">{selectedGame.name}</h2>
+    <h2 id="detail-title">{detailGame.name}</h2>
     <p class="modal-description">
-      {selectedGame.developer} · Versión {selectedGame.version}
+      {detailGame.developer} · Versión {detailGame.version}
     </p>
 
-    {#if selectedGame.cover && isWebUrl(selectedGame.cover)}
-      <img class="detail-cover" src={selectedGame.cover} alt={`Portada de ${selectedGame.name}`} />
+    {#if detailGame.cover && isWebUrl(detailGame.cover)}
+      <img class="detail-cover" src={detailGame.cover} alt={`Portada de ${detailGame.name}`} />
     {/if}
 
     <div class="detail-badges">
-      <span class="game-tag">{selectedGame.type}</span>
-      <span class="game-tag">{selectedGame.status}</span>
-      <span class="game-tag">v{selectedGame.version}</span>
+      <span class="game-tag">{detailGame.type}</span>
+      <span class="game-tag">{detailGame.status}</span>
+      <span class="game-tag">v{detailGame.version}</span>
     </div>
 
     <section class="detail-section">
       <h3>Descripción</h3>
       <p class="detail-text">
-        {selectedGame.description || 'Todavía no has añadido una descripción para este juego.'}
+        {detailGame.description || 'Todavía no has añadido una descripción para este juego.'}
       </p>
     </section>
 
@@ -1066,8 +1149,8 @@ async function removeSelectedGame() {
 
       <div class="detail-field">
         <span>Web oficial</span>
-        {#if selectedGame.official_url && isWebUrl(selectedGame.official_url)}
-          <a href={selectedGame.official_url} target="_blank" rel="noreferrer">{selectedGame.official_url}</a>
+        {#if detailGame.official_url && isWebUrl(detailGame.official_url)}
+          <a href={detailGame.official_url} target="_blank" rel="noreferrer">{detailGame.official_url}</a>
         {:else}
           <p>Sin especificar</p>
         {/if}
@@ -1075,27 +1158,27 @@ async function removeSelectedGame() {
 
       <div class="detail-field">
         <span>Ruta de instalación</span>
-        <p class="path-value">{selectedGame.install_path || 'Sin especificar'}</p>
+        <p class="path-value">{detailGame.install_path || 'Sin especificar'}</p>
       </div>
 
       <div class="detail-field">
         <span>Ejecutable</span>
-        <p class="path-value">{selectedGame.executable_path || 'Sin especificar'}</p>
+        <p class="path-value">{detailGame.executable_path || 'Sin especificar'}</p>
       </div>
     </section>
 
     <div class="modal-actions">
       <button type="button" class="secondary-button" onclick={() => detailDialog?.close()}>Cerrar</button>
-      <button type="button" class="secondary-button" onclick={() => editGame(selectedGame!)}>
+      <button type="button" class="secondary-button" onclick={() => editGame(detailGame!)}>
         Configurar detalles <span>⚙</span>
       </button>
       <button
         type="button"
         class="primary-button"
         disabled={launchingGameId !== null}
-        onclick={() => void launchGame(selectedGame!)}
+        onclick={() => void launchGame(detailGame!)}
       >
-        {launchingGameId === selectedGame.id ? 'Iniciando…' : 'Jugar'} <span>▶</span>
+        {launchingGameId === detailGame.id ? 'Iniciando…' : 'Jugar'} <span>▶</span>
       </button>
     </div>
   {/if}
@@ -1104,6 +1187,7 @@ async function removeSelectedGame() {
 {#if selectedGame}
   <dialog
     bind:this={gameDialog}
+    use:scrollLockDialog
     class="modal game-details-modal"
     data-testid="game-details-dialog"
     aria-labelledby="game-modal-title"
@@ -1167,6 +1251,7 @@ async function removeSelectedGame() {
 
 <dialog
   bind:this={uninstallDialog}
+  use:scrollLockDialog
   class="modal uninstall-modal"
   aria-labelledby="uninstall-title"
   onclick={(event) => {
