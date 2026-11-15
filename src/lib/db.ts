@@ -142,6 +142,63 @@ export async function hideGame(id: number): Promise<void> {
   );
 }
 
+export async function listHiddenGames(): Promise<Game[]> {
+  const db = await getDatabase();
+
+  return db.select<Game[]>(
+    `SELECT
+      id,
+      name,
+      developer,
+      version,
+      type,
+      color,
+      symbol,
+      status,
+      description,
+      cover,
+      official_url,
+      install_path,
+      executable_path,
+      is_hidden
+    FROM games
+    WHERE is_hidden = 1
+    ORDER BY name COLLATE NOCASE ASC`
+  );
+}
+
+export async function restoreGame(id: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.execute('UPDATE games SET is_hidden = 0 WHERE id = $1', [id]);
+}
+
+/**
+ * Borra la fila del juego y, explícitamente, sus versiones y la Pokédex
+ * asociada, para no depender de que SQLite tenga las claves foráneas activas.
+ */
+export async function deleteGamePermanently(id: number): Promise<void> {
+  const db = await getDatabase();
+
+  await db.execute(
+    `DELETE FROM encounters
+      WHERE game_pokemon_id IN (
+        SELECT gp.id
+        FROM game_pokemon gp
+        JOIN game_versions gv ON gv.id = gp.game_version_id
+        WHERE gv.game_id = $1
+      )`,
+    [id]
+  );
+  await db.execute(
+    `DELETE FROM game_pokemon
+      WHERE game_version_id IN (SELECT id FROM game_versions WHERE game_id = $1)`,
+    [id]
+  );
+  await db.execute('DELETE FROM game_versions WHERE game_id = $1', [id]);
+  await db.execute('DELETE FROM games WHERE id = $1', [id]);
+}
+
 export async function importHiddenGames(ids: string[]): Promise<void> {
   const db = await getDatabase();
 

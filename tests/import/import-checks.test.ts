@@ -94,6 +94,20 @@ test('una clave de especie inválida es un error de fila', () => {
   assert.equal(preview.counts.errors, 1);
 });
 
+test('lee la nota de obtenibilidad y los efectos de habilidades', () => {
+  const csv =
+    'numero,nombre,obtenible,obtain_note,ability_details\n' +
+    '133,Eevee,no,Solo por intercambio,Fuga:Permite huir siempre|Adaptable:Potencia los movimientos del mismo tipo';
+  const input = parsePokemonFile(csv, 'x.csv', [], []).candidates[0].input;
+
+  assert.equal(input.is_obtainable, false);
+  assert.equal(input.obtain_note, 'Solo por intercambio');
+  assert.deepEqual(input.ability_details, {
+    Fuga: 'Permite huir siempre',
+    Adaptable: 'Potencia los movimientos del mismo tipo'
+  });
+});
+
 import {
   cleanFlavorText,
   collectPokedex,
@@ -105,6 +119,7 @@ import {
   suggestPokedexKey,
   toRawRecord
 } from '$lib/import/pokeapi';
+import { exclusiveNote } from '$lib/import/game-pokedex';
 
 test('sugiere la Pokedex por nombre de juego', () => {
   assert.equal(suggestPokedexKey('Pokémon Rojo Fuego', ''), 'kanto');
@@ -294,6 +309,7 @@ test('mapea tipos, stats, habilidades y sprite', () => {
     speciesKey: 'pikachu',
     nationalNumber: 25,
     abilities: new Map([['static', 'Electrostática']]),
+    abilityDetails: new Map([['static', 'Puede paralizar al rival al entrar en contacto.']]),
     species: {
       names: [{ name: 'Pikachu', language: { name: 'es' } }],
       flavor_text_entries: [{ flavor_text: 'Roe\fcosas.', language: { name: 'es' } }]
@@ -320,10 +336,20 @@ test('mapea tipos, stats, habilidades y sprite', () => {
   assert.equal(record.type_primary, 'electric');
   assert.equal(record.type_secondary, 'fairy');
   assert.equal(record.abilities, 'Electrostática');
+  assert.equal(record.ability_details, '{"Electrostática":"Puede paralizar al rival al entrar en contacto."}');
   assert.equal(record.sprite_url, 'front.png');
   assert.equal(record.national_dex_number, '25');
   assert.equal(record.species_key, 'pokeapi:pikachu');
   assert.equal(record.dex_entry, 'Roe cosas.');
+});
+
+test('explica los exclusivos de la edición pareja', () => {
+  assert.equal(
+    exclusiveNote('ruby', 'lotad'),
+    'Exclusivo de Pokémon Zafiro: solo se consigue mediante intercambio.'
+  );
+  assert.equal(exclusiveNote('ruby', 'seedot'), '');
+  assert.equal(exclusiveNote('emerald', 'lotad'), '');
 });
 
 test('recolecta con fetch inyectado, ordena y avisa de fallos', async () => {

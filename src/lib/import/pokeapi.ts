@@ -2,7 +2,7 @@
 // descargadas y devuelve las mismas filas normalizadas que el importador de
 // archivos, para que la validación y la vista previa sean únicas.
 import { mapWithConcurrency } from './concurrency';
-import { appendGameExclusiveEntries, isExclusiveToOtherGame } from './game-pokedex';
+import { appendGameExclusiveEntries, exclusiveNote, isExclusiveToOtherGame } from './game-pokedex';
 import type { ImportIssue, ParsedRow, RawRecord } from './pokemon-import';
 
 const API = 'https://pokeapi.co/api/v2';
@@ -18,6 +18,8 @@ export type ToRawRecordInput = {
   speciesKey: string;
   nationalNumber: number;
   abilities: Map<string, string>;
+  /** Efecto de cada habilidad por su slug de PokéAPI. */
+  abilityDetails?: Map<string, string>;
   species: { names?: LocalizedName[]; flavor_text_entries?: FlavorText[] };
   pokemon: {
     id: number;
@@ -214,6 +216,16 @@ export function toRawRecord(input: ToRawRecordInput): RawRecord {
   const abilities = (input.pokemon.abilities ?? []).map(
     (entry) => input.abilities.get(entry.ability.name) ?? prettyName(entry.ability.name)
   );
+
+  const abilityDetails: Record<string, string> = {};
+  for (const entry of input.pokemon.abilities ?? []) {
+    const slug = entry.ability?.name;
+    if (!slug) continue;
+    const effect = input.abilityDetails?.get(slug);
+    if (!effect) continue;
+    const name = input.abilities.get(slug) ?? prettyName(slug);
+    abilityDetails[name] = effect;
+  }
   const stats: Partial<Record<'hp' | 'atk' | 'def' | 'spa' | 'spd' | 'spe', number>> = {};
 
   for (const entry of input.pokemon.stats ?? []) {
@@ -241,6 +253,8 @@ export function toRawRecord(input: ToRawRecordInput): RawRecord {
     sprite_url: spriteUrl,
     sprite_path: '',
     is_obtainable: 'si',
+    obtain_note: '',
+    ability_details: JSON.stringify(abilityDetails),
     source: 'pokeapi',
     source_url: `${API}/pokemon-species/${input.nationalNumber}/`,
     species_key: `pokeapi:${input.speciesKey}`,
@@ -254,6 +268,7 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
   const { pokedexKey, gameKey = '', fetchJson, onProgress, signal } = options;
   const issues: ImportIssue[] = [];
   const abilityNames = new Map<string, string>();
+  const abilityDetails = new Map<string, string>();
 
   let entries: PokedexEntry[] = [];
 
@@ -327,6 +342,9 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
             const ability = objectOf(await fetchJson(`${API}/ability/${encodeURIComponent(abilityKey)}`));
             const localized = pickLocalizedName(arrayOf<LocalizedName>(ability.names));
             abilityNames.set(abilityKey, localized?.value ?? prettyName(abilityKey));
+
+            const flavor = pickFlavorText(arrayOf<FlavorText>(ability.flavor_text_entries));
+            if (flavor) abilityDetails.set(abilityKey, cleanFlavorText(flavor.value));
           } catch {
             abilityNames.set(abilityKey, prettyName(abilityKey));
           }
@@ -337,6 +355,7 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
           speciesKey: entry.speciesKey,
           nationalNumber: speciesId,
           abilities: abilityNames,
+          abilityDetails,
           species: {
             names: arrayOf<LocalizedName>(species.names),
             flavor_text_entries: arrayOf<FlavorText>(species.flavor_text_entries)
@@ -350,7 +369,10 @@ export async function collectPokedex(options: CollectOptions): Promise<CollectRe
           }
         });
 
-        if (isExclusiveToOtherGame(gameKey, entry.speciesKey)) rawRecord.is_obtainable = 'no';
+        if (isExclusiveToOtherGame(gameKey, entry.speciesKey)) {
+          rawRecord.is_obtainable = 'no';
+          rawRecord.obtain_note = exclusiveNote(gameKey, entry.speciesKey);
+        }
         done += 1;
         onProgress?.({ done, total, current: String(rawRecord.name) });
 

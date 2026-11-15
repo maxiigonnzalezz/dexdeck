@@ -108,8 +108,9 @@ The library lets users maintain a collection of games that are installed or stil
 - Show whether a game has an executable configured.
 - Launch `.exe` executables through Wine.
 - Hide a library entry without deleting the game's files.
+- Restore or permanently delete hidden games from Settings.
 
-**Removal behaviour:** currently, removing a game from the library hides it (`is_hidden` column in SQLite); it does not delete the row or files from disk. A screen to restore or permanently delete hidden games is still pending.
+**Removal behaviour:** removing a game from the library hides it (`is_hidden` column in SQLite); it does not delete the row or files from disk. **Settings → Hidden games** lets you restore it or delete it permanently. Permanent deletion removes the row together with its versions and Pokédex, but never touches the game files.
 
 ### 2. Automatic information detection
 
@@ -153,7 +154,7 @@ It includes:
 
 #### Pokédex for each game and version
 
-Each version has its own Pokédex. Entries can be created, edited and deleted; users can search by number or name, sort results and open detailed entries. Records support forms, types, abilities, base stats, descriptions, sprites, national number, source information and an availability flag.
+Each version has its own Pokédex. Entries can be created, edited and deleted; users can search by number or name, sort results and open detailed entries. Every row shows both the local and the national number, and falls back to an initials placeholder when a sprite is missing or fails to load. Records support forms, types, abilities, base stats, descriptions, sprites, national number, source information and an availability flag. The detail view brings types, availability, stat total and average, per-stat bars, abilities with their effect, the Pokédex entry and the source together in one screen. Non-obtainable rows explain the reason on hover or keyboard focus, and the form lets you write it.
 
 The Pokédex supports local CSV/JSON imports and collection from PokéAPI. Both workflows show a preview before saving and let users review new entries, updates, duplicates and errors.
 
@@ -472,6 +473,23 @@ These ideas are not part of the implemented scope; they are possibilities that f
 ---
 
 ## 🗓️ Progress log
+
+### 15 November 2026 — Expanded Pokédex detail and aligned columns
+
+- ✅ The row grid uses fixed-width columns, so types stay aligned even when a row shows “Not obtainable”.
+- ✅ The **Not obtainable** chip explains the reason on hover or keyboard focus; the form lets you write the note (`obtain_note`).
+- ✅ Redesigned detail view: local and national numbers, availability state, total and average, per-stat bars, abilities with their effect, the Pokédex entry, licence and source. It includes an **Edit entry** button.
+- ✅ PokéAPI import stores each ability's effect (`ability_details_json`) and the reason for species exclusive to the paired edition.
+- 🧪 `pnpm check`, `pnpm build`, `cargo check`, `pnpm test:import` (32 tests) and `pnpm test:ui` (5 suites) pass.
+
+### 15 November 2026 — Library and Pokédex quick wins
+
+- ✅ `+page.svelte` split into `GameFormDialog`, `GameSummaryDialog` and `GameActionsDialog`; autofill logic lives in `src/lib/game-autofill.ts`.
+- ✅ **Settings → Hidden games**: list of games removed from the library, with restore and permanent deletion after confirmation. Deletion clears versions and Pokédex data, never the game files.
+- ✅ Dialogs with initial focus, `aria-modal`, `aria-describedby` and consistent Escape handling across the library, the game sheet and the import guide.
+- ✅ National number also shown on every Pokédex row.
+- ✅ `PokemonSprite`: a single component for list and detail, with an initials placeholder when the image is missing or its URL fails.
+- 🧪 `pnpm check`, `pnpm build`, `cargo check`, `pnpm test:import` (30 tests) and `pnpm test:ui` (5 suites, including the new hidden-games one) pass.
 
 ### 15 November 2026 — Regional Pokédex, game editions and UX improvements
 

@@ -2,6 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import { tick } from 'svelte';
   import { scrollLockDialog } from '$lib/scroll-lock';
+  import PokemonSprite from './PokemonSprite.svelte';
   import {
     clearGamePokemon,
     deleteGamePokemon,
@@ -18,7 +19,6 @@
   import { listDataSources, type DataSource } from '$lib/encyclopedia';
   import PokedexImport from '$lib/components/PokedexImport.svelte';
   import PokedexRemote from '$lib/components/PokedexRemote.svelte';
-  import { isWebUrl } from '$lib/url';
 
   type Props = {
     gameName: string;
@@ -41,6 +41,8 @@
     sprite_url: string;
     sprite_path: string;
     is_obtainable: boolean;
+    obtain_note: string;
+    abilityDetails: Record<string, string>;
     sourceIdText: string;
   };
 
@@ -86,6 +88,8 @@
       sprite_url: '',
       sprite_path: '',
       is_obtainable: true,
+      obtain_note: '',
+      abilityDetails: {},
       sourceIdText: ''
     };
   }
@@ -160,6 +164,8 @@
       sprite_url: entry.sprite_url,
       sprite_path: entry.sprite_path,
       is_obtainable: entry.is_obtainable === 1,
+      obtain_note: entry.obtain_note ?? '',
+      abilityDetails: { ...entry.ability_details },
       sourceIdText: entry.source_id === null ? '' : String(entry.source_id)
     };
     formError = '';
@@ -179,6 +185,14 @@
     saving = true;
     formError = '';
 
+    const abilityNames = draft.abilitiesText
+      .split(',')
+      .map((ability) => ability.trim())
+      .filter((ability) => ability !== '');
+    const abilityDetails = Object.fromEntries(
+      Object.entries(draft.abilityDetails).filter(([name]) => abilityNames.includes(name))
+    );
+
     try {
       await saveGamePokemon(
         versionId,
@@ -188,12 +202,14 @@
           form_name: draft.form_name,
           type_primary: draft.type_primary,
           type_secondary: draft.type_secondary,
-          abilities: draft.abilitiesText.split(','),
+          abilities: abilityNames,
           base_stats: { ...draft.stats },
           dex_entry: draft.dex_entry,
           sprite_url: draft.sprite_url,
           sprite_path: draft.sprite_path,
           is_obtainable: draft.is_obtainable,
+          obtain_note: draft.obtain_note,
+          ability_details: abilityDetails,
           source_id: draft.sourceIdText === '' ? null : Number(draft.sourceIdText)
         },
         editingId ?? undefined
@@ -271,6 +287,44 @@
 
   function formatNumber(value: number) {
     return `#${String(value).padStart(4, '0')}`;
+  }
+
+  /** Motivo legible de una entrada no obtenible. */
+  function obtainReason(entry: GamePokemon): string {
+    const note = (entry.obtain_note ?? '').trim();
+    if (note) return note;
+    return `Sin método de encuentro registrado en ${versionLabel}. Puede ser exclusivo de otra edición, de un evento o necesitar intercambio.`;
+  }
+
+  function statTotal(stats: PokemonStats | null): number {
+    return stats ? Object.values(stats).reduce((total, value) => total + (Number(value) || 0), 0) : 0;
+  }
+
+  function statAverage(stats: PokemonStats | null): number {
+    return stats ? Math.round(statTotal(stats) / 6) : 0;
+  }
+
+  function statPercent(value: number): number {
+    return Math.min(100, Math.round((Math.max(0, Number(value) || 0) / 180) * 100));
+  }
+
+  function topStatKey(stats: PokemonStats | null): keyof PokemonStats | '' {
+    if (!stats) return '';
+    return STAT_FIELDS.reduce<keyof PokemonStats | ''>((best, field) => {
+      if (best === '') return field.key;
+      return Number(stats[field.key]) > Number(stats[best]) ? field.key : best;
+    }, '');
+  }
+
+  function abilityEffect(name: string): string {
+    return detailPokemon?.ability_details?.[name] ?? '';
+  }
+
+  function editFromDetail() {
+    const entry = detailPokemon;
+    if (!entry) return;
+    closeDetail();
+    openEdit(entry);
   }
 </script>
 
@@ -364,17 +418,16 @@
             onclick={() => void openDetail(entry)}
           ><span class="sr-only">Ver ficha de {entry.name}</span></button>
           <div class="pdx-sprite" aria-hidden="true">
-            {#if entry.sprite_url && isWebUrl(entry.sprite_url)}
-              <img src={entry.sprite_url} alt="" loading="lazy" />
-            {:else if entry.sprite_path}
-              <img src={entry.sprite_path} alt="" loading="lazy" />
-            {:else}
-              <span>{entry.name.slice(0, 2).toUpperCase()}</span>
-            {/if}
+            <PokemonSprite url={entry.sprite_url} path={entry.sprite_path} name={entry.name} />
           </div>
 
           <div class="pdx-ident">
             <span class="pdx-number">{formatNumber(entry.dex_number)}</span>
+            {#if entry.national_dex_number}
+              <span class="pdx-national" title="Número nacional">
+                N.º {String(entry.national_dex_number).padStart(4, '0')}
+              </span>
+            {/if}
             <button
               type="button"
               class="pdx-name-button"
@@ -404,9 +457,21 @@
           </div>
 
           <div class="pdx-meta">
-            {#if entry.is_obtainable === 0}
-              <span class="pdx-flag">No obtenible</span>
-            {/if}
+            <span class="pdx-flag-slot">
+              {#if entry.is_obtainable === 0}
+                <button
+                  type="button"
+                  class="pdx-flag"
+                  aria-describedby={`pdx-obtain-${entry.id}`}
+                  onclick={(event) => { event.stopPropagation(); void openDetail(entry); }}
+                >
+                  No obtenible
+                  <span class="pdx-flag-tip" role="tooltip" id={`pdx-obtain-${entry.id}`}>
+                    {obtainReason(entry)}
+                  </span>
+                </button>
+              {/if}
+            </span>
             {#if entry.base_stats}
               <span class="pdx-total">BT {Object.values(entry.base_stats).reduce((a, b) => a + b, 0)}</span>
             {/if}
@@ -535,6 +600,18 @@
         Se puede obtener en esta versión
       </label>
 
+      <label class="pdx-field pdx-full">
+        Motivo de no obtenibilidad
+        <textarea
+          bind:value={draft.obtain_note}
+          rows="2"
+          maxlength="300"
+          data-testid="pdx-obtain-note"
+          placeholder="Ej. Solo se consigue mediante intercambio con Zafiro."
+        ></textarea>
+        <small>Aparece al pasar el cursor por «No obtenible» y en la ficha. Déjalo vacío para usar la explicación por defecto.</small>
+      </label>
+
       {#if formError}
         <div class="pdx-alert pdx-full" role="alert">{formError}</div>
       {/if}
@@ -587,29 +664,37 @@
 {#if detailPokemon}
   <dialog bind:this={detailDialog} use:scrollLockDialog class="pdx-dialog pdx-dialog-detail" aria-labelledby="pdx-detail-title" onclose={() => (detailPokemon = null)} onclick={(event) => { if (event.target === detailDialog) closeDetail(); }}>
     <div class="pdx-detail">
-      <div class="pdx-kicker">FICHA DE POKÉMON</div>
-      <h2 id="pdx-detail-title">
-        {detailPokemon.name}
-        {#if detailPokemon.form_name}<span class="pdx-form">{detailPokemon.form_name}</span>{/if}
-      </h2>
-      <button type="button" class="pdx-close" aria-label="Cerrar ficha" onclick={closeDetail}>×</button>
+      <header class="pdx-detail-head">
+        <div class="pdx-detail-title-block">
+          <div class="pdx-kicker">FICHA DE POKÉDEX</div>
+          <h2 id="pdx-detail-title">
+            {detailPokemon.name}
+            {#if detailPokemon.form_name}<span class="pdx-form">{detailPokemon.form_name}</span>{/if}
+          </h2>
+          <p class="pdx-detail-where">{versionLabel} · {gameName}</p>
+        </div>
+        <button type="button" class="pdx-close" aria-label="Cerrar ficha" onclick={closeDetail}>×</button>
+      </header>
 
-      <div class="pdx-detail-grid">
+      <div class="pdx-detail-hero">
         <div class="pdx-detail-sprite">
-          {#if detailPokemon.sprite_url && isWebUrl(detailPokemon.sprite_url)}
-            <img src={detailPokemon.sprite_url} alt={`Sprite de ${detailPokemon.name}`} />
-          {:else if detailPokemon.sprite_path}
-            <img src={detailPokemon.sprite_path} alt={`Sprite de ${detailPokemon.name}`} />
-          {:else}
-            <span class="pdx-detail-sprite-placeholder">{detailPokemon.name.slice(0, 2).toUpperCase()}</span>
-          {/if}
-          <span class="pdx-detail-number">{formatNumber(detailPokemon.dex_number)}</span>
-          {#if detailPokemon.national_dex_number}
-            <span class="pdx-detail-national">Nacional #{String(detailPokemon.national_dex_number).padStart(4, '0')}</span>
-          {/if}
+          <PokemonSprite
+            url={detailPokemon.sprite_url}
+            path={detailPokemon.sprite_path}
+            name={detailPokemon.name}
+            variant="detail"
+          />
+          <div class="pdx-detail-numbers">
+            <span class="pdx-detail-number">Local {formatNumber(detailPokemon.dex_number)}</span>
+            {#if detailPokemon.national_dex_number}
+              <span class="pdx-detail-national">
+                Nacional N.º {String(detailPokemon.national_dex_number).padStart(4, '0')}
+              </span>
+            {/if}
+          </div>
         </div>
 
-        <div class="pdx-detail-info">
+        <div class="pdx-detail-overview">
           <div class="pdx-detail-types">
             {#if detailPokemon.type_primary}
               <span class="pdx-type" style={`--type-color: ${typeColor(detailPokemon.type_primary)}`}>
@@ -621,58 +706,128 @@
                 {POKEMON_TYPE_LABELS[detailPokemon.type_secondary]}
               </span>
             {/if}
+            {#if !detailPokemon.type_primary && !detailPokemon.type_secondary}
+              <span class="pdx-muted">Sin tipos registrados</span>
+            {/if}
           </div>
 
-          <div class="pdx-detail-field">
-            <span class="pdx-detail-label">Habilidades</span>
-            <p class="pdx-detail-value">
-              {#if detailPokemon.abilities.length > 0}
-                {detailPokemon.abilities.join(', ')}
-              {:else}
-                Sin habilidades registradas
-              {/if}
-            </p>
-          </div>
-
-          <div class="pdx-detail-field">
-            <span class="pdx-detail-label">Entrada de la Pokédex</span>
-            <p class="pdx-detail-value pdx-detail-entry">{detailPokemon.dex_entry || 'Sin descripción.'}</p>
-          </div>
-
-          {#if detailPokemon.source_name}
-            <div class="pdx-detail-field">
-              <span class="pdx-detail-label">Fuente</span>
-              <p class="pdx-detail-value" title={detailPokemon.source_attribution ?? detailPokemon.source_name}>
-                {detailPokemon.source_name}
+          <div class="pdx-detail-status" class:pdx-detail-status-off={detailPokemon.is_obtainable === 0}>
+            <span class="pdx-status-dot" aria-hidden="true"></span>
+            <div>
+              <strong>{detailPokemon.is_obtainable === 0 ? 'No obtenible' : 'Se puede obtener'}</strong>
+              <p>
+                {detailPokemon.is_obtainable === 0
+                  ? obtainReason(detailPokemon)
+                  : `Registrado como obtenible en ${versionLabel}.`}
               </p>
             </div>
-          {/if}
-        </div>
+          </div>
 
-        <div class="pdx-detail-stats">
-          <h3>Estadísticas base</h3>
-          <div class="pdx-stat-list">
-            {#if detailPokemon.base_stats}
-              {#each Object.entries(detailPokemon.base_stats) as [key, value]}
-                <div class="pdx-stat-item">
-                  <span class="pdx-stat-name">{key.toUpperCase()}</span>
+          <dl class="pdx-detail-facts">
+            <div class="pdx-fact">
+              <dt>Total base</dt>
+              <dd>{detailPokemon.base_stats ? statTotal(detailPokemon.base_stats) : '—'}</dd>
+            </div>
+            <div class="pdx-fact">
+              <dt>Media</dt>
+              <dd>{detailPokemon.base_stats ? statAverage(detailPokemon.base_stats) : '—'}</dd>
+            </div>
+            <div class="pdx-fact">
+              <dt>Habilidades</dt>
+              <dd>{detailPokemon.abilities.length}</dd>
+            </div>
+            <div class="pdx-fact">
+              <dt>Fuente</dt>
+              <dd class="pdx-fact-source" title={detailPokemon.source_attribution ?? detailPokemon.source_name ?? 'Entrada manual'}>
+                {detailPokemon.source_name ?? 'Manual'}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="pdx-detail-body">
+        <section class="pdx-detail-panel pdx-detail-stats" aria-labelledby="pdx-stats-title">
+          <header class="pdx-panel-head">
+            <h3 id="pdx-stats-title">Estadísticas base</h3>
+            <span class="pdx-panel-hint">
+              {#if detailPokemon.base_stats}
+                Total {statTotal(detailPokemon.base_stats)} · Media {statAverage(detailPokemon.base_stats)}
+              {:else}
+                Sin datos
+              {/if}
+            </span>
+          </header>
+
+          {#if detailPokemon.base_stats}
+            <div class="pdx-stat-list">
+              {#each STAT_FIELDS as field (field.key)}
+                {@const value = Number(detailPokemon.base_stats?.[field.key]) || 0}
+                <div class="pdx-stat-row" class:pdx-stat-top={topStatKey(detailPokemon.base_stats) === field.key}>
+                  <span class="pdx-stat-name">{field.label}</span>
+                  <span class="pdx-stat-track">
+                    <span class="pdx-stat-fill" style={`--fill: ${statPercent(value)}%`}></span>
+                  </span>
                   <span class="pdx-stat-value">{value}</span>
                 </div>
               {/each}
-              <div class="pdx-stat-item pdx-stat-total">
-                <span class="pdx-stat-name">Total</span>
-                <span class="pdx-stat-value">{Object.values(detailPokemon.base_stats).reduce((a, b) => a + b, 0)}</span>
-              </div>
-            {:else}
-              <p class="pdx-detail-value">Sin estadísticas registradas.</p>
+            </div>
+          {:else}
+            <p class="pdx-muted">Sin estadísticas registradas. Puedes añadirlas al editar la entrada.</p>
+          {/if}
+        </section>
+
+        <div class="pdx-detail-aside">
+          <section class="pdx-detail-panel pdx-detail-abilities" aria-labelledby="pdx-abilities-title">
+          <header class="pdx-panel-head">
+            <h3 id="pdx-abilities-title">Habilidades</h3>
+            <span class="pdx-panel-hint">
+              {detailPokemon.abilities.length} {detailPokemon.abilities.length === 1 ? 'registrada' : 'registradas'}
+            </span>
+          </header>
+
+          {#if detailPokemon.abilities.length > 0}
+            <ul class="pdx-ability-list">
+              {#each detailPokemon.abilities as ability}
+                <li class="pdx-ability">
+                  <span class="pdx-ability-name">{ability}</span>
+                  <p class="pdx-ability-text">
+                    {abilityEffect(ability) || 'Sin descripción guardada. Vuelve a importar desde PokéAPI para completar el efecto.'}
+                  </p>
+                </li>
+              {/each}
+            </ul>
+          {:else}
+            <p class="pdx-muted">Sin habilidades registradas. Puedes añadirlas al editar la entrada.</p>
+          {/if}
+          </section>
+
+          <section class="pdx-detail-entry-card" aria-labelledby="pdx-entry-title">
+            <h3 id="pdx-entry-title">Entrada de la Pokédex</h3>
+            <blockquote class="pdx-detail-entry">
+              {detailPokemon.dex_entry || `Sin descripción registrada para ${versionLabel}.`}
+            </blockquote>
+            {#if detailPokemon.source_license}
+              <p class="pdx-detail-license">
+                {detailPokemon.source_license}
+                {#if detailPokemon.source_url}
+                  · <a href={detailPokemon.source_url} target="_blank" rel="noreferrer">Origen</a>
+                {/if}
+              </p>
             {/if}
-          </div>
+          </section>
         </div>
       </div>
 
-      <div class="pdx-dialog-actions">
-        <button type="button" class="pdx-secondary" onclick={closeDetail}>Cerrar</button>
-      </div>
+      <footer class="pdx-dialog-actions pdx-detail-foot">
+        <span class="pdx-detail-foot-note">
+          {detailPokemon.source_attribution ?? detailPokemon.source_name ?? 'Entrada manual'}
+        </span>
+        <div class="pdx-detail-foot-buttons">
+          <button type="button" class="pdx-secondary" onclick={closeDetail}>Cerrar</button>
+          <button type="button" class="pdx-primary" onclick={editFromDetail}>Editar ficha</button>
+        </div>
+      </footer>
     </div>
   </dialog>
 {/if}
@@ -902,7 +1057,7 @@
     position: relative;
     min-width: 0;
     display: grid;
-    grid-template-columns: 48px minmax(130px, 1.5fr) minmax(110px, 1fr) auto auto;
+    grid-template-columns: 48px minmax(130px, 1fr) 168px 208px auto;
     align-items: center;
     gap: 12px;
     padding: 9px 12px;
@@ -936,6 +1091,7 @@
   }
 
   .pdx-row .pdx-name-button,
+  .pdx-row .pdx-flag,
   .pdx-row .pdx-actions,
   .pdx-row .pdx-actions button {
     pointer-events: auto;
@@ -959,12 +1115,6 @@
     letter-spacing: 0.04em;
   }
 
-  .pdx-sprite img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    image-rendering: pixelated;
-  }
 
   .pdx-ident {
     display: flex;
@@ -978,6 +1128,16 @@
     color: var(--enc-muted);
     font-size: 0.7rem;
     font-variant-numeric: tabular-nums;
+  }
+
+  .pdx-national {
+    padding: 1px 6px;
+    border: 1px solid var(--enc-border);
+    border-radius: 999px;
+    color: var(--enc-muted);
+    font-size: 0.62rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .pdx-name-button {
@@ -1018,10 +1178,79 @@
     font-size: 0.68rem;
   }
 
+  .pdx-flag-slot {
+    display: flex;
+    align-items: center;
+    flex: 0 0 96px;
+    min-width: 0;
+  }
+
   .pdx-flag {
-    padding: 2px 7px;
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border: 1px solid rgba(244, 63, 94, 0.3);
     border-radius: 999px;
-    background: rgba(148, 163, 184, 0.16);
+    background: rgba(244, 63, 94, 0.12);
+    color: #fda4af;
+    font: inherit;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 130ms ease, border-color 130ms ease;
+  }
+
+  .pdx-flag:hover,
+  .pdx-flag:focus-visible {
+    border-color: rgba(244, 63, 94, 0.5);
+    background: rgba(244, 63, 94, 0.2);
+  }
+
+  .pdx-flag:focus-visible {
+    outline: 2px solid #fb7185;
+    outline-offset: 2px;
+  }
+
+  .pdx-flag-tip {
+    position: absolute;
+    z-index: 8;
+    top: calc(100% + 9px);
+    left: 0;
+    width: max-content;
+    max-width: 260px;
+    padding: 8px 10px;
+    border: 1px solid var(--enc-border);
+    border-radius: 9px;
+    background: #0b1517;
+    color: #e8f1ee;
+    font-size: 0.68rem;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0;
+    text-align: left;
+    white-space: normal;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.38);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-3px);
+    transition: opacity 130ms ease, transform 130ms ease, visibility 130ms;
+    pointer-events: none;
+  }
+
+  .pdx-flag:hover .pdx-flag-tip,
+  .pdx-flag:focus-visible .pdx-flag-tip {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+  }
+
+  :global(html[data-theme='light']) .pdx-flag-tip {
+    background: #ffffff;
+    color: #16211f;
   }
 
   .pdx-total {
@@ -1069,7 +1298,7 @@
     padding: 0;
     border: 1px solid var(--enc-border);
     border-radius: 16px;
-    background: var(--enc-panel-strong);
+    background: var(--dd-modal-bg);
     color: var(--enc-text, inherit);
     overflow: auto;
   }
@@ -1228,6 +1457,11 @@
   }
 
   @media (max-width: 760px) {
+    .pdx-flag-tip {
+      left: auto;
+      right: 0;
+    }
+
     .pdx-row {
       grid-template-columns: 44px minmax(0, 1fr) auto;
       row-gap: 8px;
@@ -1304,190 +1538,426 @@
   }
 
   /* Ficha detallada de Pokémon */
+  .pdx-dialog-detail {
+    width: min(100% - 32px, 940px);
+    max-width: 940px;
+    padding: 0;
+  }
+
   .pdx-detail {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 18px;
     padding: 24px;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
     min-width: 0;
-    overflow-x: hidden;
   }
 
-  .pdx-detail-grid {
+  .pdx-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .pdx-detail-title-block {
+    min-width: 0;
+  }
+
+  .pdx-detail-title-block h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin: 2px 0 0;
+    font-size: 1.6rem;
+    line-height: 1.15;
+  }
+
+  .pdx-detail-where {
+    margin: 6px 0 0;
+    color: var(--enc-muted);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .pdx-detail-hero {
     display: grid;
-    grid-template-columns: minmax(170px, 200px) minmax(0, 1fr) minmax(180px, 220px);
-    gap: 20px;
-    align-items: start;
-    width: 100%;
-    max-width: 100%;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 18px;
+    align-items: stretch;
     min-width: 0;
-  }
-
-  .pdx-detail-sprite,
-  .pdx-detail-info,
-  .pdx-detail-stats {
-    min-width: 0;
-    box-sizing: border-box;
   }
 
   .pdx-detail-sprite {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--enc-border);
-    border-radius: 12px;
-    background: var(--enc-panel);
-  }
-
-  .pdx-detail-sprite img {
-    width: 120px;
-    height: 120px;
-    object-fit: contain;
-    background: var(--enc-input);
-    border-radius: 8px;
-  }
-
-  .pdx-detail-sprite-placeholder {
-    width: 64px;
-    height: 64px;
-    display: flex;
-    align-items: center;
     justify-content: center;
-    border-radius: 8px;
-    background: var(--enc-border);
-    color: var(--enc-muted);
-    font-weight: 700;
-    font-size: 1.5rem;
+    gap: 12px;
+    padding: 18px 14px;
+    border: 1px solid var(--enc-border);
+    border-radius: 16px;
+    background:
+      radial-gradient(circle at 50% 26%, color-mix(in srgb, var(--enc-accent) 11%, transparent), transparent 64%),
+      var(--enc-panel);
+    min-width: 0;
+  }
+
+  .pdx-detail-numbers {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
   }
 
   .pdx-detail-number {
-    font-size: 0.75rem;
-    font-weight: 700;
-    color: var(--enc-muted);
-    letter-spacing: 0.05em;
+    font-size: 0.72rem;
+    font-weight: 800;
+    color: var(--enc-text, inherit);
+    letter-spacing: 0.06em;
     text-transform: uppercase;
+    font-variant-numeric: tabular-nums;
   }
 
   .pdx-detail-national {
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     color: var(--enc-muted);
-    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
   }
 
-  .pdx-detail-info {
+  .pdx-detail-overview {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: 12px;
+    min-width: 0;
   }
 
   .pdx-detail-types {
     display: flex;
-    gap: 8px;
+    gap: 7px;
     flex-wrap: wrap;
+    align-items: center;
   }
 
-  .pdx-detail-field {
+  .pdx-detail-status {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .pdx-detail-label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--enc-muted);
-  }
-
-  .pdx-detail-value {
-    margin: 0;
-    color: var(--enc-text, inherit);
-    font-size: 0.85rem;
-    line-height: 1.6;
-  }
-
-  .pdx-detail-entry {
-    font-style: italic;
-    color: color-mix(in srgb, var(--enc-text, inherit) 80%, transparent);
-  }
-
-  .pdx-detail-stats {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding: 14px;
-    border: 1px solid var(--enc-border);
+    gap: 11px;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in srgb, var(--enc-accent) 34%, var(--enc-border));
     border-radius: 12px;
+    background: color-mix(in srgb, var(--enc-accent) 8%, transparent);
+  }
+
+  .pdx-detail-status strong {
+    display: block;
+    font-size: 0.8rem;
+    letter-spacing: 0.01em;
+  }
+
+  .pdx-detail-status p {
+    margin: 3px 0 0;
+    color: var(--enc-muted);
+    font-size: 0.75rem;
+    line-height: 1.55;
+  }
+
+  .pdx-status-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: var(--enc-accent);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--enc-accent) 18%, transparent);
+  }
+
+  .pdx-detail-status-off {
+    border-color: rgba(244, 63, 94, 0.35);
+    background: rgba(244, 63, 94, 0.08);
+  }
+
+  .pdx-detail-status-off .pdx-status-dot {
+    background: #fb7185;
+    box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.16);
+  }
+
+  .pdx-detail-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0;
+  }
+
+  .pdx-fact {
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid var(--enc-border);
+    border-radius: 10px;
+    background: var(--enc-input);
+  }
+
+  .pdx-fact dt {
+    color: var(--enc-muted);
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .pdx-fact dd {
+    margin: 4px 0 0;
+    font-size: 0.92rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pdx-fact-source {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.72rem !important;
+  }
+
+  .pdx-detail-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+    min-width: 0;
+  }
+
+  .pdx-detail-aside {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .pdx-detail-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--enc-border);
+    border-radius: 14px;
     background: var(--enc-panel);
   }
 
-  .pdx-detail-stats h3 {
-    margin: 0 0 8px 0;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
+  .pdx-panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .pdx-panel-head h3 {
+    margin: 0;
     color: var(--enc-muted);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .pdx-panel-hint {
+    color: var(--enc-muted);
+    font-size: 0.66rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
 
   .pdx-stat-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 9px;
   }
 
-  .pdx-stat-item {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.8rem;
-    color: var(--enc-text, inherit);
-  }
-
-  .pdx-stat-item.pdx-stat-total {
-    border-top: 1px solid var(--enc-border);
-    padding-top: 8px;
-    margin-top: 4px;
-    font-weight: 700;
-    color: var(--enc-accent);
+  .pdx-stat-row {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr) 34px;
+    align-items: center;
+    gap: 10px;
   }
 
   .pdx-stat-name {
     color: var(--enc-muted);
+    font-size: 0.72rem;
+    font-weight: 600;
   }
 
-  @media (max-width: 820px) {
+  .pdx-stat-track {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--enc-input);
+    box-shadow: inset 0 0 0 1px var(--enc-border);
+    overflow: hidden;
+  }
+
+  .pdx-stat-fill {
+    display: block;
+    width: var(--fill, 0%);
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, color-mix(in srgb, var(--enc-accent) 55%, #1d4b41), var(--enc-accent));
+    transition: width 420ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  }
+
+  .pdx-stat-value {
+    text-align: right;
+    font-size: 0.8rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .pdx-stat-top .pdx-stat-name {
+    color: var(--enc-text, inherit);
+  }
+
+  .pdx-stat-top .pdx-stat-value {
+    color: var(--enc-accent);
+  }
+
+  .pdx-ability-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .pdx-ability {
+    padding: 10px 12px;
+    border: 1px solid var(--enc-border);
+    border-radius: 10px;
+    background: var(--enc-input);
+  }
+
+  .pdx-ability-name {
+    display: inline-block;
+    color: var(--enc-accent);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .pdx-ability-text {
+    margin: 4px 0 0;
+    color: var(--enc-muted);
+    font-size: 0.74rem;
+    line-height: 1.55;
+  }
+
+  .pdx-muted {
+    margin: 0;
+    color: var(--enc-muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+
+  .pdx-detail-entry-card {
+    padding: 16px 18px;
+    border: 1px solid var(--enc-border);
+    border-radius: 14px;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--enc-accent) 7%, transparent), transparent 68%),
+      var(--enc-panel);
+  }
+
+  .pdx-detail-entry-card h3 {
+    margin: 0;
+    color: var(--enc-muted);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .pdx-detail-entry {
+    margin: 9px 0 0;
+    padding-left: 14px;
+    border-left: 2px solid color-mix(in srgb, var(--enc-accent) 55%, transparent);
+    color: color-mix(in srgb, var(--enc-text, inherit) 84%, transparent);
+    font-size: 0.88rem;
+    font-style: italic;
+    line-height: 1.7;
+  }
+
+  .pdx-detail-license {
+    margin: 9px 0 0;
+    color: var(--enc-muted);
+    font-size: 0.66rem;
+  }
+
+  .pdx-detail-license a {
+    color: var(--enc-accent);
+  }
+
+  .pdx-detail-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 0;
+    padding-top: 14px;
+    border-top: 1px solid var(--enc-border);
+    flex-wrap: wrap;
+  }
+
+  .pdx-detail-foot-note {
+    color: var(--enc-muted);
+    font-size: 0.66rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 55%;
+  }
+
+  .pdx-detail-foot-buttons {
+    display: flex;
+    gap: 9px;
+  }
+
+  @media (max-width: 860px) {
     .pdx-dialog-detail {
-      width: min(100% - 24px, 600px);
+      width: min(100% - 24px, 660px);
       max-height: calc(100dvh - 24px);
     }
-    .pdx-detail-grid {
+
+    .pdx-detail-hero {
       grid-template-columns: 1fr;
-      gap: 16px;
     }
+
     .pdx-detail-sprite {
       flex-direction: row;
-      justify-content: flex-start;
-      gap: 16px;
+      justify-content: center;
     }
-    .pdx-detail-sprite img {
-      width: 96px;
-      height: 96px;
+
+    .pdx-detail-body {
+      grid-template-columns: 1fr;
     }
   }
 
-  @media (max-width: 500px) {
+  @media (max-width: 620px) {
     .pdx-detail {
       padding: 16px;
     }
+
     .pdx-detail-sprite {
       flex-direction: column;
-      align-items: center;
+    }
+
+    .pdx-detail-facts {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pdx-detail-foot-note {
+      max-width: 100%;
     }
   }
 
@@ -1506,12 +1976,12 @@
   }
 
   .pdx-row-interactive .pdx-sprite,
-  .pdx-row-interactive .pdx-sprite img {
+  .pdx-row-interactive .pdx-sprite :global(img) {
     transition: transform 220ms cubic-bezier(.2, .75, .25, 1);
   }
 
   .pdx-row-interactive:hover .pdx-sprite { transform: scale(1.05); }
-  .pdx-row-interactive:hover .pdx-sprite img { transform: scale(1.08) rotate(-3deg); }
+  .pdx-row-interactive:hover .pdx-sprite :global(img) { transform: scale(1.08) rotate(-3deg); }
   .pdx-row-interactive .pdx-icon-button { transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease; }
   .pdx-row-interactive .pdx-icon-button:hover { transform: translateY(-1px) scale(1.06); }
   .pdx-row-interactive .pdx-icon-button:active { transform: scale(.94); }
@@ -1522,7 +1992,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     .pdx-row-interactive, .pdx-row-interactive .pdx-sprite,
-    .pdx-row-interactive .pdx-sprite img, .pdx-row-interactive .pdx-icon-button {
+    .pdx-row-interactive .pdx-sprite :global(img), .pdx-row-interactive .pdx-icon-button {
       animation: none !important; transition: none !important; transform: none !important;
     }
   }

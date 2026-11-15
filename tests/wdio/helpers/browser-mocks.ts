@@ -96,9 +96,9 @@ function installMocks(gamesBase64: string): void {
       { id: 102, catalog_game_id: 10, version_label: '2.0', platform: 'gba', release_date: '', notes: '', is_default: 0, source_id: null, source_name: null, source_attribution: null, source_homepage: null, source_license: null }
     ],
     pokemon: [
-      { id: 1001, game_version_id: 101, species_id: null, dex_number: 25, name: 'Pikachu', form_name: '', type_primary: 'electric', type_secondary: '', abilities_json: '[]', base_stats_json: '{"hp":35,"atk":55,"def":40,"spa":50,"spd":50,"spe":90}', dex_entry: '', sprite_url: '', sprite_path: '', is_obtainable: 1, source_id: null, source_url: '', species_key: null, national_dex_number: null, source_name: null, source_attribution: null, source_license: null },
-      { id: 1002, game_version_id: 101, species_id: null, dex_number: 133, name: 'Eevee', form_name: '', type_primary: 'normal', type_secondary: '', abilities_json: '[]', base_stats_json: null, dex_entry: '', sprite_url: '', sprite_path: '', is_obtainable: 1, source_id: null, source_url: '', species_key: null, national_dex_number: null, source_name: null, source_attribution: null, source_license: null },
-      { id: 2001, game_version_id: 102, species_id: null, dex_number: 1, name: 'Bulbasaur', form_name: '', type_primary: 'grass', type_secondary: 'poison', abilities_json: '[]', base_stats_json: null, dex_entry: '', sprite_url: '', sprite_path: '', is_obtainable: 1, source_id: null, source_url: '', species_key: null, national_dex_number: null, source_name: null, source_attribution: null, source_license: null }
+      { id: 1001, game_version_id: 101, species_id: null, dex_number: 25, name: 'Pikachu', form_name: '', type_primary: 'electric', type_secondary: '', abilities_json: '["Electrostática"]', ability_details_json: '{"Electrostática":"Puede paralizar al rival al entrar en contacto."}', base_stats_json: '{"hp":35,"atk":55,"def":40,"spa":50,"spd":50,"spe":90}', dex_entry: 'Acumula electricidad en las bolsas de sus mejillas.', sprite_url: '', sprite_path: '', is_obtainable: 1, obtain_note: '', source_id: null, source_url: '', species_key: null, national_dex_number: 25, source_name: null, source_attribution: null, source_license: null },
+      { id: 1002, game_version_id: 101, species_id: null, dex_number: 133, name: 'Eevee', form_name: '', type_primary: 'normal', type_secondary: '', abilities_json: '["Fuga","Adaptable"]', ability_details_json: '{"Fuga":"Permite huir siempre de un combate contra un Pokémon salvaje.","Adaptable":"Potencia los movimientos del mismo tipo que el Pokémon."}', base_stats_json: '{"hp":55,"atk":55,"def":50,"spa":45,"spd":65,"spe":55}', dex_entry: '', sprite_url: '', sprite_path: '', is_obtainable: 0, obtain_note: 'Solo se consigue mediante intercambio o evento.', source_id: null, source_url: '', species_key: null, national_dex_number: 133, source_name: null, source_attribution: null, source_license: null },
+      { id: 2001, game_version_id: 102, species_id: null, dex_number: 1, name: 'Bulbasaur', form_name: '', type_primary: 'grass', type_secondary: 'poison', abilities_json: '[]', ability_details_json: '{}', base_stats_json: null, dex_entry: '', sprite_url: '', sprite_path: '', is_obtainable: 1, obtain_note: '', source_id: null, source_url: '', species_key: null, national_dex_number: null, source_name: null, source_attribution: null, source_license: null }
     ],
     encounters: [{ id: 5001, game_pokemon_id: 1001 }, { id: 5002, game_pokemon_id: 2001 }]
   };
@@ -111,6 +111,13 @@ function installMocks(gamesBase64: string): void {
       const args = (raw ?? {}) as SqlArgs;
       const query = args.query ?? '';
       const values = (args.values ?? []) as (string | number)[];
+      if (args.query?.includes('is_hidden = 1')) {
+        return Promise.resolve(
+          [...w.__dexdeckGames__!]
+            .filter((game) => game.is_hidden === 1)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+      }
       if (args.query?.includes('is_hidden = 0')) {
         return Promise.resolve(
           [...w.__dexdeckGames__!]
@@ -175,6 +182,30 @@ function installMocks(gamesBase64: string): void {
         const game = w.__dexdeckGames__!.find((item) => item.id === id);
         if (game) game.is_hidden = 1;
         return Promise.resolve([1, null]);
+      }
+
+      if (/SET\s+is_hidden\s*=\s*0/i.test(query)) {
+        const id = Number(values[0]);
+        const game = w.__dexdeckGames__!.find((item) => item.id === id);
+        if (game) game.is_hidden = 0;
+        return Promise.resolve([1, null]);
+      }
+
+      if (/DELETE FROM game_versions WHERE game_id/i.test(query)) {
+        const gameId = Number(values[0]);
+        const versionIds = new Set(
+          dbState.versions.filter((row) => row.catalog_game_id === gameId).map((row) => row.id)
+        );
+        dbState.versions = dbState.versions.filter((row) => !versionIds.has(row.id));
+        dbState.pokemon = dbState.pokemon.filter((row) => !versionIds.has(row.game_version_id));
+        return Promise.resolve([versionIds.size, null]);
+      }
+
+      if (/DELETE FROM games WHERE id/i.test(query)) {
+        const id = Number(values[0]);
+        const before = w.__dexdeckGames__!.length;
+        w.__dexdeckGames__ = w.__dexdeckGames__!.filter((game) => game.id !== id);
+        return Promise.resolve([before - w.__dexdeckGames__!.length, null]);
       }
 
       if (/^\s*UPDATE/i.test(query)) {

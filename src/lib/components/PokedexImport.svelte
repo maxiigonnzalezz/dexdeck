@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { open } from '@tauri-apps/plugin-dialog';
   import type { DataSource } from '$lib/encyclopedia';
@@ -30,16 +31,21 @@
   let applying = $state(false);
   let error = $state('');
   let mode = $state<'merge' | 'insert-only'>('merge');
+  let pickButton: HTMLButtonElement | undefined = $state(undefined);
+  let resultCloseButton: HTMLButtonElement | undefined = $state(undefined);
 
   const MAX_VISIBLE_ISSUES = 25;
 
-  function openDialog() {
+  async function openDialog() {
     error = '';
     result = null;
     preview = null;
     fileName = '';
     mode = 'merge';
     dialog?.showModal();
+    await tick();
+    // El primer paso real del diálogo es elegir el archivo.
+    pickButton?.focus();
   }
 
   function closeDialog() {
@@ -98,6 +104,9 @@
     try {
       result = await applyImport(versionId, preview, mode);
       onImported();
+      // El selector de archivo desaparece: el foco pasa al cierre del resumen.
+      await tick();
+      resultCloseButton?.focus();
     } catch (importError) {
       console.error('Error al aplicar la importación:', importError);
       error = importError instanceof Error ? importError.message : 'No se ha podido aplicar la importación.';
@@ -119,16 +128,25 @@
   bind:this={dialog}
   use:scrollLockDialog
   class="pdi-dialog"
+  aria-modal="true"
   aria-labelledby="pdi-title"
+  aria-describedby="pdi-description"
   onclick={(event) => { if (event.target === dialog) closeDialog(); }}
-  onkeydown={(event) => { if (event.key === 'Escape') closeDialog(); }}
+  onkeydown={(event) => {
+    if (event.key !== 'Escape') return;
+    // Mientras se aplica la importación no se puede cerrar: evita dejarla a medias.
+    if (applying) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }}
 >
   <div class="pdi-body">
     <header class="pdi-head">
       <div>
         <div class="pdi-kicker">IMPORTAR DATOS</div>
         <h2 id="pdi-title">Pokédex de {versionLabel}</h2>
-        <p>Se aplicará sobre {gameName}. Nada se borra: las entradas existentes solo se actualizan si lo permites.</p>
+        <p id="pdi-description">Se aplicará sobre {gameName}. Nada se borra: las entradas existentes solo se actualizan si lo permites.</p>
       </div>
       <button type="button" class="pdi-close" aria-label="Cerrar" onclick={closeDialog}>×</button>
     </header>
@@ -152,12 +170,12 @@
           </div>
         {/if}
         <div class="pdi-actions">
-          <button type="button" class="pdi-secondary" onclick={closeDialog}>Cerrar</button>
+          <button bind:this={resultCloseButton} type="button" class="pdi-secondary" onclick={closeDialog}>Cerrar</button>
         </div>
       </div>
     {:else}
       <div class="pdi-pick">
-        <button type="button" class="pdi-secondary" onclick={() => void chooseFile()} disabled={parsing}>
+        <button bind:this={pickButton} type="button" class="pdi-secondary" onclick={() => void chooseFile()} disabled={parsing}>
           {parsing ? 'Leyendo…' : 'Elegir archivo…'}
         </button>
         <span class="pdi-file">{fileName || 'Ningún archivo seleccionado'}</span>

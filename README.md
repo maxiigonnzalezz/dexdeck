@@ -108,8 +108,9 @@ La biblioteca permite mantener una colección de juegos instalada o pendiente de
 - Indicar si el juego tiene un ejecutable configurado.
 - Lanzar ejecutables `.exe` mediante Wine.
 - Ocultar una entrada de la biblioteca sin borrar los archivos del juego.
+- Restaurar o borrar definitivamente los juegos ocultos desde Ajustes.
 
-**Comportamiento de eliminación:** actualmente, quitar un juego de la biblioteca lo oculta (columna `is_hidden` en SQLite); no elimina la fila ni los archivos del disco. Todavía falta una pantalla para restaurar o borrar definitivamente los juegos ocultos.
+**Comportamiento de eliminación:** quitar un juego de la biblioteca lo oculta (columna `is_hidden` en SQLite); no elimina la fila ni los archivos del disco. En **Ajustes → Juegos ocultos** puedes restaurarlo o borrarlo definitivamente. El borrado definitivo elimina la fila junto con sus versiones y su Pokédex, pero nunca toca los archivos del juego.
 
 ### 2. Detección automática de información
 
@@ -153,7 +154,7 @@ Incluye:
 
 #### Pokédex por juego y versión
 
-Cada versión dispone de una Pokédex independiente. Se pueden crear, editar y eliminar entradas, buscar por número o nombre, ordenar los resultados y consultar una ficha detallada. Las entradas admiten formas, tipos, habilidades, estadísticas base, descripciones, sprites, número nacional, procedencia y marca de disponibilidad.
+Cada versión dispone de una Pokédex independiente. Se pueden crear, editar y eliminar entradas, buscar por número o nombre, ordenar los resultados y consultar una ficha detallada. Cada fila muestra el número local y el nacional, y usa un marcador de posición con las iniciales cuando falta el sprite o la imagen no carga. Las entradas admiten formas, tipos, habilidades, estadísticas base, descripciones, sprites, número nacional, procedencia y marca de disponibilidad. La ficha reúne tipos, estado de obtenibilidad, total y media de estadísticas, barras por característica, habilidades con su efecto, la entrada de la Pokédex y la fuente en una sola vista. Las filas no obtenibles explican el motivo al pasar el cursor o al enfocar la marca, y el formulario permite escribirlo.
 
 La Pokédex acepta importación local CSV/JSON y recolección desde PokéAPI. Ambos flujos muestran una vista previa antes de guardar cambios y permiten revisar entradas nuevas, actualizaciones, duplicados y errores.
 
@@ -498,6 +499,23 @@ Estas ideas no forman parte del alcance implementado; son posibilidades que enca
 ---
 
 ## 🗓️ Registro de progreso
+
+### 15 de noviembre de 2026 — Ficha de Pokédex ampliada y columnas alineadas
+
+- ✅ La rejilla de filas usa columnas de ancho fijo: los tipos quedan alineados aunque la fila muestre «No obtenible».
+- ✅ La marca **No obtenible** explica el motivo al pasar el cursor o al enfocarla; el formulario permite escribir la nota (`obtain_note`).
+- ✅ Ficha rediseñada: cabecera con números local y nacional, estado de obtenibilidad, total y media, barras por estadística, habilidades con su efecto, entrada de la Pokédex, licencia y fuente. Incluye un botón **Editar ficha**.
+- ✅ La importación de PokéAPI guarda el efecto de cada habilidad (`ability_details_json`) y el motivo de los exclusivos de la edición pareja.
+- 🧪 `pnpm check`, `pnpm build`, `cargo check`, `pnpm test:import` (32 pruebas) y `pnpm test:ui` (5 suites) correctos.
+
+### 15 de noviembre de 2026 — Ajustes rápidos de biblioteca y Pokédex
+
+- ✅ `+page.svelte` dividido en `GameFormDialog`, `GameSummaryDialog` y `GameActionsDialog`; la lógica de autocompletado vive en `src/lib/game-autofill.ts`.
+- ✅ **Ajustes → Juegos ocultos**: lista de juegos quitados de la biblioteca, con restaurar y borrado definitivo tras confirmación. El borrado limpia versiones y Pokédex, nunca los archivos del juego.
+- ✅ Diálogos con foco inicial, `aria-modal`, `aria-describedby` y cierre con Escape coherente en biblioteca, ficha y guía de importación.
+- ✅ Número nacional visible también en cada fila de la Pokédex.
+- ✅ `PokemonSprite`: un único componente para lista y ficha, con marcador de iniciales cuando falta la imagen o la URL falla.
+- 🧪 `pnpm check`, `pnpm build`, `cargo check`, `pnpm test:import` (30 pruebas) y `pnpm test:ui` (5 suites, incluida la nueva de juegos ocultos) correctos.
 
 ### 15 de noviembre de 2026 — Pokédex regional, ediciones y experiencia de uso
 

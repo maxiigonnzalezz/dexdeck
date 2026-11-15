@@ -236,6 +236,16 @@ export function isExclusiveToOtherGame(gameKey: string, speciesKey: string): boo
   return paired?.exclusiveSpecies.includes(species) ?? false;
 }
 
+/** Motivo legible para una especie exclusiva de la edición pareja. */
+export function exclusiveNote(gameKey: string, speciesKey: string): string {
+  if (!isExclusiveToOtherGame(gameKey, speciesKey)) return '';
+  const all = Object.values(GAME_CATALOG).flat();
+  const current = all.find((game) => game.key === gameKey);
+  const paired = all.find((game) => game.key === current?.pairKey);
+  const target = paired?.label ?? 'la otra edición';
+  return `Exclusivo de ${target}: solo se consigue mediante intercambio.`;
+}
+
 export type PokedexEntryLike = { entryNumber: number; speciesKey: string; speciesUrl: string };
 
 /** Une la Pokédex regional con los exclusivos de la edición, sin duplicados. */

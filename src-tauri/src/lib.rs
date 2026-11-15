@@ -531,6 +531,12 @@ pub fn run() {
             sql: include_str!("migrations/0013_remote_sources.sql"),
             kind: MigrationKind::Up,
         },
+        Migration {
+            version: 14,
+            description: "pokemon_insights",
+            sql: include_str!("migrations/0014_pokemon_insights.sql"),
+            kind: MigrationKind::Up,
+        },
     ];
 
     let builder = tauri::Builder::default()

@@ -29,6 +29,9 @@ describe('DexDeck · biblioteca (Chromium)', () => {
 
   it('valida el nombre obligatorio antes de guardar', async () => {
     await openAddGameDialog();
+    const focused = await browser.execute(() => document.activeElement?.getAttribute('data-testid'));
+    expect(focused).toBe('game-name-input');
+
     await $(selectors.addGame.name).setValue('   ');
     await $(selectors.addGame.submit).click();
 

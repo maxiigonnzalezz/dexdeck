@@ -1,5 +1,6 @@
 import type { DataSource } from '$lib/encyclopedia';
 import {
+  cleanAbilityDetails,
   EMPTY_STATS,
   POKEMON_TYPE_LABELS,
   POKEMON_TYPES,
@@ -69,6 +70,8 @@ const HEADER_ALIASES: Record<string, string[]> = {
   sprite_url: ['sprite_url', 'sprite', 'imagen', 'url_sprite'],
   sprite_path: ['sprite_path', 'ruta_sprite', 'ruta_imagen'],
   is_obtainable: ['obtenible', 'is_obtainable', 'obtainable', 'disponible'],
+  obtain_note: ['obtain_note', 'nota_obtencion', 'motivo_no_obtenible', 'nota_obtenible'],
+  ability_details: ['ability_details', 'detalle_habilidades', 'descripcion_habilidades'],
   source: ['fuente', 'source', 'origen', 'source_key'],
   source_url: ['source_url', 'url_fuente', 'url_origen'],
   species_key: ['species_key', 'clave_especie'],
@@ -112,6 +115,34 @@ function parseBoolean(value: string): boolean {
   const normalized = normalizeKey(value);
   if (normalized === '') return true;
   return ['si', 's', 'true', '1', 'yes', 'y', 'x', 'obtenible'].includes(normalized);
+}
+
+/** Acepta un objeto JSON {habilidad: efecto} o una lista «Habilidad: efecto». */
+function parseAbilityDetails(value: string): Record<string, string> {
+  const text = value.trim();
+  if (text === '') return {};
+
+  if (text.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? cleanAbilityDetails(parsed as Record<string, string>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  const details: Record<string, string> = {};
+  for (const chunk of text.split(/[;|]/)) {
+    const separator = chunk.indexOf(':');
+    if (separator <= 0) continue;
+    const name = chunk.slice(0, separator).trim();
+    const effect = chunk.slice(separator + 1).trim();
+    if (name !== '' && effect !== '') details[name] = effect;
+  }
+
+  return cleanAbilityDetails(details);
 }
 
 function parseType(value: string): { type: PokemonType | ''; invalid: string | null } {
@@ -180,6 +211,18 @@ function statsEqual(a: PokemonStats | null, b: PokemonStats | null): boolean {
   return normalizeStats(a) === normalizeStats(b);
 }
 
+function abilityDetailsEqual(
+  existing: Record<string, string>,
+  incoming: Record<string, string> | undefined
+): boolean {
+  const left = cleanAbilityDetails(existing);
+  const right = cleanAbilityDetails(incoming);
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => key === rightKeys[index] && left[key] === right[key]);
+}
+
 function sameEntry(existing: GamePokemon, input: GamePokemonInput): boolean {
   return (
     existing.dex_number === input.dex_number &&
@@ -194,6 +237,8 @@ function sameEntry(existing: GamePokemon, input: GamePokemonInput): boolean {
     existing.sprite_url === input.sprite_url.trim() &&
     existing.sprite_path === input.sprite_path.trim() &&
     existing.is_obtainable === (input.is_obtainable ? 1 : 0) &&
+    existing.obtain_note === (input.obtain_note ?? '').trim() &&
+    abilityDetailsEqual(existing.ability_details, input.ability_details) &&
     existing.source_id === input.source_id &&
     existing.source_url === (input.source_url ?? '').trim()
   );
@@ -314,6 +359,11 @@ function buildInput(
   const abilities = parseAbilities(pick(record, 'abilities'));
   if (abilities.length > 6) return fail('Se admiten como máximo seis habilidades por entrada.');
 
+  const abilityDetails = parseAbilityDetails(pick(record, 'ability_details'));
+
+  const obtainNote = pick(record, 'obtain_note').trim();
+  if (obtainNote.length > 300) return fail('La nota de obtenibilidad supera los 300 caracteres.');
+
   const stats = buildStats(record);
   if (stats.invalid) {
     return fail('Las estadísticas deben ser números enteros entre 0 y 999.');
@@ -388,6 +438,8 @@ function buildInput(
       sprite_url: isWebUrl(spriteUrl) ? spriteUrl : '',
       sprite_path: spritePath,
       is_obtainable: parseBoolean(pick(record, 'is_obtainable')),
+      obtain_note: obtainNote,
+      ability_details: abilityDetails,
       source_id: source?.id ?? null,
       source_url: isWebUrl(sourceUrl) ? sourceUrl : '',
       species_key: speciesKey,

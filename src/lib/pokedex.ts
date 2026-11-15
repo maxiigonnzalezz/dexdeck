@@ -105,6 +105,8 @@ export type GamePokemon = {
   sprite_url: string;
   sprite_path: string;
   is_obtainable: number;
+  obtain_note: string;
+  ability_details: Record<string, string>;
   source_id: number | null;
   source_name: string | null;
   source_attribution: string | null;
@@ -126,15 +128,23 @@ export type GamePokemonInput = {
   sprite_url: string;
   sprite_path: string;
   is_obtainable: boolean;
+  /** Motivo por el que no se puede obtener; vacío si no hay nota. */
+  obtain_note?: string;
+  /** Efecto de cada habilidad, indexado por el nombre visible. */
+  ability_details?: Record<string, string>;
   source_id: number | null;
   source_url?: string;
   species_key?: string;
   national_dex_number?: number | null;
 };
 
-type GamePokemonRow = Omit<GamePokemon, 'abilities' | 'base_stats' | 'is_obtainable'> & {
+type GamePokemonRow = Omit<
+  GamePokemon,
+  'abilities' | 'base_stats' | 'is_obtainable' | 'ability_details'
+> & {
   abilities_json: string;
   base_stats_json: string;
+  ability_details_json: string;
   is_obtainable: number;
 };
 
@@ -189,6 +199,36 @@ function serializeAbilities(abilities: string[]): string {
   );
 
   return JSON.stringify(cleaned);
+}
+
+/** Normaliza el mapa de efectos: claves y textos recortados, sin vacíos. */
+export function cleanAbilityDetails(details: Record<string, string> | undefined | null): Record<string, string> {
+  if (!details || typeof details !== 'object') return {};
+
+  const cleaned: Record<string, string> = {};
+
+  for (const [name, text] of Object.entries(details)) {
+    if (typeof name !== 'string' || typeof text !== 'string') continue;
+    const key = name.trim();
+    const value = text.trim();
+    if (key !== '' && value !== '') cleaned[key] = value;
+  }
+
+  return cleaned;
+}
+
+function parseAbilityDetails(value: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return cleanAbilityDetails(parsed as Record<string, string>);
+  } catch {
+    return {};
+  }
+}
+
+function serializeAbilityDetails(details: Record<string, string> | undefined | null): string {
+  return JSON.stringify(cleanAbilityDetails(details));
 }
 
 function serializeStats(stats: PokemonStats | null): string {
@@ -312,6 +352,8 @@ export async function listGamePokemon(versionId: number): Promise<GamePokemon[]>
       gp.sprite_url,
       gp.sprite_path,
       gp.is_obtainable,
+      gp.obtain_note,
+      gp.ability_details_json,
       gp.source_id,
       gp.source_url,
       ps.species_key,
@@ -332,6 +374,8 @@ export async function listGamePokemon(versionId: number): Promise<GamePokemon[]>
     type_secondary: row.type_secondary as PokemonType | '',
     abilities: parseAbilities(row.abilities_json),
     base_stats: parseStats(row.base_stats_json),
+    obtain_note: row.obtain_note ?? '',
+    ability_details: parseAbilityDetails(row.ability_details_json ?? ''),
     is_obtainable: row.is_obtainable
   }));
 }
@@ -363,6 +407,8 @@ export async function saveGamePokemon(
   const sourceUrl = (input.source_url ?? '').trim();
   const abilities = serializeAbilities(input.abilities);
   const stats = serializeStats(input.base_stats);
+  const obtainNote = (input.obtain_note ?? '').trim();
+  const abilityDetails = serializeAbilityDetails(input.ability_details);
 
   try {
     if (pokemonId === undefined) {
@@ -381,9 +427,11 @@ export async function saveGamePokemon(
           sprite_url,
           sprite_path,
           is_obtainable,
+          obtain_note,
+          ability_details_json,
           source_id,
           source_url
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       `, [
         versionId,
         speciesId ?? null,
@@ -398,6 +446,8 @@ export async function saveGamePokemon(
         input.sprite_url.trim(),
         input.sprite_path.trim(),
         input.is_obtainable ? 1 : 0,
+        obtainNote,
+        abilityDetails,
         sourceId,
         sourceUrl
       ]);
@@ -418,11 +468,13 @@ export async function saveGamePokemon(
         sprite_url = $9,
         sprite_path = $10,
         is_obtainable = $11,
-        source_id = $12,
-        source_url = $13,
-        species_id = COALESCE($14, species_id),
+        obtain_note = $12,
+        ability_details_json = $13,
+        source_id = $14,
+        source_url = $15,
+        species_id = COALESCE($16, species_id),
         updated_at = CURRENT_TIMESTAMP
-      WHERE id = $15 AND game_version_id = $16
+      WHERE id = $17 AND game_version_id = $18
     `, [
       dexNumber,
       name,
@@ -435,6 +487,8 @@ export async function saveGamePokemon(
       input.sprite_url.trim(),
       input.sprite_path.trim(),
       input.is_obtainable ? 1 : 0,
+      obtainNote,
+      abilityDetails,
       sourceId,
       sourceUrl,
       speciesId ?? null,

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { InstallationInfo, SystemInfo, ThemeName } from '$lib/app-types';
+  import HiddenGamesPanel from '$lib/components/HiddenGamesPanel.svelte';
 
   type Props = {
     theme: ThemeName;
@@ -8,10 +9,19 @@
     uninstalling: boolean;
     onSelectTheme: (theme: ThemeName) => void;
     onUninstall: () => void;
+    /** Se dispara cuando cambia la biblioteca (juego restaurado o borrado). */
+    onLibraryChanged?: () => void;
   };
 
-  let { theme, systemInfo, installationInfo, uninstalling, onSelectTheme, onUninstall }: Props =
-    $props();
+  let {
+    theme,
+    systemInfo,
+    installationInfo,
+    uninstalling,
+    onSelectTheme,
+    onUninstall,
+    onLibraryChanged
+  }: Props = $props();
 </script>
 
 <section class="subpage-header">
@@ -99,3 +109,5 @@
     >Desinstalar</button>
   </div>
 </div>
+
+<HiddenGamesPanel onChanged={onLibraryChanged} />

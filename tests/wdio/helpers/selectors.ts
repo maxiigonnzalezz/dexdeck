@@ -67,6 +67,19 @@ export const selectors = {
   },
 
   notice: '[data-testid="notice"]',
+  hidden: {
+    panel: '[data-testid="hidden-games-panel"]',
+    items: '[data-testid="hidden-game"]',
+    empty: '[data-testid="hidden-empty"]',
+    status: '[data-testid="hidden-status"]',
+    error: '[data-testid="hidden-error"]',
+    restore: (name: string) =>
+      `[data-testid="hidden-game"][data-game-name="${name.replaceAll('"', '\\"')}"] [data-testid="hidden-restore"]`,
+    delete: (name: string) =>
+      `[data-testid="hidden-game"][data-game-name="${name.replaceAll('"', '\\"')}"] [data-testid="hidden-delete"]`,
+    deleteDialog: '[data-testid="hidden-delete-dialog"]',
+    deleteConfirm: '[data-testid="hidden-delete-confirm"]'
+  },
   settings: {
     heading: 'h1',
     themeGroup: '[role="group"][aria-label="Tema de la aplicación"]',

@@ -138,19 +138,56 @@ describe('DexDeck · mejoras de Pokédex y navegación (Chromium)', () => {
     await browser.waitUntil(() => browser.execute(() => document.body.style.overflow !== 'hidden'));
   });
 
+  it('explica por qué un Pokémon no es obtenible y lo repite en la ficha', async () => {
+    await $(selectors.nav.encyclopedia).click();
+    await $(selectors.encyclopedia.gameCard).click();
+    await $(selectors.encyclopedia.pokedexTab).click();
+
+    const flag = $('[data-testid="pdx-row-133"] .pdx-flag');
+    await expect(flag).toBeDisplayed();
+    await expect(flag).toHaveText(expect.stringContaining('No obtenible'));
+
+    const tipId = await flag.getAttribute('aria-describedby');
+    expect(tipId).toBeTruthy();
+    const tip = await browser.execute((id) => document.getElementById(id ?? '')?.textContent?.trim() ?? '', tipId);
+    expect(tip).toContain('intercambio o evento');
+
+    await flag.click();
+    await expect($(selectors.pokedex.detailDialog)).toBeDisplayed();
+    await expect($(selectors.pokedex.detailDialog)).toHaveText(expect.stringContaining('No obtenible'));
+    await expect($(selectors.pokedex.detailDialog)).toHaveText(
+      expect.stringContaining('Solo se consigue mediante intercambio o evento.')
+    );
+    await expect($(selectors.pokedex.detailDialog)).toHaveText(expect.stringContaining('Permite huir siempre'));
+
+
+    await $('dialog[aria-labelledby="pdx-detail-title"] .pdx-detail-foot-buttons button.pdx-primary').click();
+    await expect($('[aria-labelledby="pdx-form-title"]')).toBeDisplayed();
+    await expect($(selectors.pokedex.detailDialog)).not.toBeDisplayed();
+    expect(await $('[data-testid="pdx-obtain-note"]').getValue()).toBe(
+      "Solo se consigue mediante intercambio o evento."
+    );
+    await $('[aria-labelledby="pdx-form-title"] button[aria-label="Cerrar"]').click();
+    await browser.waitUntil(() => browser.execute(() => !document.querySelector('[aria-labelledby="pdx-form-title"]')?.hasAttribute('open')));
+
+  });
+
   it('abre detalles desde la fila y conserva editar, eliminar y vaciar independientes', async () => {
     await $(selectors.nav.encyclopedia).click();
     await $(selectors.encyclopedia.gameCard).click();
     await $(selectors.encyclopedia.pokedexTab).click();
     const row = $('[data-testid="pdx-row-25"]');
     await expect(row).toBeDisplayed();
+    await expect(row).toHaveText(expect.stringContaining('N.º 0025'));
 
     const viewport = await browser.getWindowSize();
     await browser.setWindowSize(420, 700);
     await row.$('.pdx-row-hitarea').click();
     await expect($(selectors.pokedex.detailDialog)).toBeDisplayed();
     await expect($(selectors.pokedex.detailDialog)).toHaveText(expect.stringContaining('Pikachu'));
-    await expect($('.pdx-detail-sprite-placeholder')).toBeDisplayed();
+    await expect($('[data-testid="pokedex-sprite-placeholder"]')).toBeDisplayed();
+    await expect($(selectors.pokedex.detailDialog)).toHaveText(expect.stringContaining('N.º 0025'));
+    await expect($(selectors.pokedex.detailDialog)).toHaveText(expect.stringContaining('Puede paralizar al rival'));
     const detailWidth = await browser.execute(() => document.querySelector('[aria-labelledby="pdx-detail-title"]')?.getBoundingClientRect().width ?? 0);
     expect(detailWidth).toBeLessThanOrEqual(420);
     await browser.keys('Escape');
@@ -197,4 +234,5 @@ describe('DexDeck · mejoras de Pokédex y navegación (Chromium)', () => {
     expect(remaining.pokemon.map((row) => row.game_version_id)).toEqual([102]);
     expect(remaining.encounters.map((row) => row.game_pokemon_id)).toEqual([2001]);
   });
+
 });

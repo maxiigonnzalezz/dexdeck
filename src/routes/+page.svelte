@@ -4,12 +4,10 @@
   import UpdatesView from '$lib/components/UpdatesView.svelte';
   import LibraryView from '$lib/components/LibraryView.svelte';
   import SettingsView from '$lib/components/SettingsView.svelte';
-  import type {
-    ExecutableMetadata,
-    InstallationInfo,
-    SystemInfo,
-    ThemeName
-  } from '$lib/app-types';
+  import GameFormDialog from '$lib/components/GameFormDialog.svelte';
+  import GameSummaryDialog from '$lib/components/GameSummaryDialog.svelte';
+  import GameActionsDialog from '$lib/components/GameActionsDialog.svelte';
+  import type { InstallationInfo, SystemInfo, ThemeName } from '$lib/app-types';
   import {
       hideGame,
       importHiddenGames,
@@ -22,22 +20,30 @@
   import { getVersion } from '@tauri-apps/api/app';
   import { invoke } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { open } from '@tauri-apps/plugin-dialog';
   import { attachConsole, info } from '@tauri-apps/plugin-log';
   import { onMount } from 'svelte';
-  import { isWebUrl } from '$lib/url';
   import { scrollLockDialog } from '$lib/scroll-lock';
   import { NavigationManager } from '$lib/navigation.svelte';
+
+  type FormDialogApi = {
+    openAdd: () => void;
+    openEdit: (game: Game) => void;
+    setError: (message: string) => void;
+    close: () => void;
+  };
+  type GameDialogApi = {
+    open: (game: Game) => void;
+    close: () => void;
+  };
 
   // ---- Gestión del historial de navegación ----
   const navManager = new NavigationManager();
 
   let activeSection = $derived(navManager.current.section);
   let search = $state('');
-  let addDialog: HTMLDialogElement | undefined = $state(undefined);
-  let detailDialog: HTMLDialogElement | undefined = $state(undefined);
-  let detailGame = $state<Game | null>(null);
-  let selectedGame = $state<Game | null>(null);
+  let formDialog = $state<FormDialogApi | undefined>(undefined);
+  let summaryDialog = $state<GameDialogApi | undefined>(undefined);
+  let actionsDialog = $state<GameDialogApi | undefined>(undefined);
 
   // ID del juego de Enciclopedia a restaurar al navegar con historial
   let encyclopediaRestoreGameId = $derived(
@@ -45,32 +51,8 @@
       ? Number(navManager.current.params?.gameId)
       : null
   );
-  let gameDialog = $state<HTMLDialogElement | undefined>(undefined);
-  let showRemoveConfirm = $state(false);
-  let editingGameId = $state<number | null>(null);
-
-  let newName = $state('');
-  let nameManuallyEdited = $state(false);
-  let newDeveloper = $state('');
-  let newVersion = $state('Sin especificar');
-  let versionManuallyEdited = $state(false);
-  let newDescription = $state('');
-  let newCover = $state('');
-  let newOfficialUrl = $state('');
-  let newInstallPath = $state('');
-  let installPathManuallyEdited = $state(false);
-  let newExecutablePath = $state('');
-  let executableInfo = $state('');
-
-  // DEXDECK MULTIPLATFORM UI v1
-  let newType = $state('Fangame');
-  let newStatus = $state('En biblioteca');
-  let newColor = $state('blue');
-  let newSymbol = $state('✦');
 
   let notice = $state('');
-  let formError = $state('');
-  let saving = $state(false);
   let games = $state<Game[]>([]);
 
   let theme = $state<ThemeName>('dark');
@@ -348,370 +330,48 @@
     }
   }
 
-  function resetForm() {
-    editingGameId = null;
-    newName = '';
-    nameManuallyEdited = false;
-    newDeveloper = '';
-    newVersion = 'Sin especificar';
-    versionManuallyEdited = false;
-    newDescription = '';
-    newCover = '';
-    newOfficialUrl = '';
-    newInstallPath = '';
-    installPathManuallyEdited = false;
-    newExecutablePath = '';
-    executableInfo = '';
-    newType = 'Fangame';
-    newStatus = 'En biblioteca';
-    newColor = ['blue', 'purple', 'red'][games.length % 3];
-    newSymbol = '✦';
-    formError = '';
-  }
-
   function openAddModal() {
-    resetForm();
-
-    if (addDialog && !addDialog.open) {
-      addDialog.showModal();
-    }
+    formDialog?.openAdd();
   }
 
   function openDetails(game: Game) {
-    detailGame = game;
-
-    if (detailDialog && !detailDialog.open) {
-      detailDialog.showModal();
-    }
+    summaryDialog?.open(game);
   }
 
   function editGame(game: Game) {
-    detailDialog?.close();
-    detailGame = null;
-    resetForm();
-
-    editingGameId = game.id;
-    newName = game.name;
-    newDeveloper = game.developer;
-    newVersion = game.version;
-    newDescription = game.description ?? '';
-    newCover = game.cover ?? '';
-    newOfficialUrl = game.official_url ?? '';
-    newInstallPath = game.install_path ?? '';
-    newExecutablePath = game.executable_path ?? '';
-    newType = game.type;
-    newStatus = game.status;
-    newColor = game.color;
-    newSymbol = game.symbol;
-
-    if (addDialog && !addDialog.open) {
-      addDialog.showModal();
-    }
-  }
-
-  async function chooseInstallPath() {
-    try {
-      const selection = await open({
-        directory: true,
-        multiple: false,
-        title: 'Selecciona la carpeta de instalación'
-      });
-
-      if (typeof selection === 'string') {
-        newInstallPath = selection;
-        installPathManuallyEdited = true;
-        formError = '';
-      }
-    } catch (error) {
-      console.error('Error al seleccionar la carpeta de instalación:', error);
-      formError = 'No se pudo abrir el selector de carpetas. Revisa los permisos de Tauri.';
-    }
-  }
-
-  // DEXDECK AUTOFILL AND CONFIGURATION V6
-  function cleanGameNameCandidate(raw: string): string {
-    return raw
-      .replace(/\.(?:exe|bat|cmd|lnk|app|sh)$/i, '')
-      .replace(/(?:[-_. ]+(?:win32|win64|windowsnoeditor|linuxshipping|linux|windows|macos|mac|x64|x86|64bit|32bit|shipping|development|debug|release|noeditor|launcher|bootstrapper))+$/ig, '')
-      .replace(/(?:[-_. ]+v?\d+(?:\.\d+){1,4})$/i, '')
-      .replace(/\s*\((?:win32|win64|shipping|launcher|game)\)$/i, '')
-      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
-      .replace(/[._]+/g, ' ')
-      .replace(/-+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  function isGenericExecutableName(value: string): boolean {
-    const normalized = value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
-    const genericNames = new Set([
-      'game', 'gameexe', 'launcher', 'start', 'startgame', 'play', 'run', 'launch',
-      'rpgrt', 'nw', 'nwjs', 'unreal', 'ue4game', 'ue5game', 'shipping', 'client',
-      'application', 'app', 'setup', 'install', 'installer', 'bootstrap', 'bootstrapper',
-      'windowsnoeditor', 'win64', 'win32', 'gamewin64shipping', 'gamewin64', 'gamewin32',
-      'gamelauncher', 'pokemonessentials', 'rpgmaker', 'rpgmakerxp',
-      'rpgmakerxpace', 'rpgmakervx', 'rpgmakervxace', 'rpgmakermz',
-      'rpgmakerxpgame', 'gameproject', 'unrealproject', 'gameengine', 'windowsapplication'
-    ]);
-    return genericNames.has(normalized);
-  }
-
-  // DEXDECK FOLDER-BASED NAME AND VERSION V8
-  // La carpeta del juego tiene prioridad absoluta sobre el nombre/metadatos del EXE.
-  function parseGameFolderLabel(raw: string): { name: string; version: string } {
-    const label = raw.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!label) return { name: '', version: '' };
-
-    // Subcarpeta de versión independiente: "v2.0", "Version 1.3" o "2.04".
-    const versionOnly = label.match(/^(?:(?:version|ver|v)[\s._-]*)?(\d+(?:\.\d+){0,3}(?:[-_. ]?(?:alpha|beta|rc)[-_ .]*\d*)?)$/i);
-    if (versionOnly) return { name: '', version: versionOnly[1].replace(/\s+/g, '') };
-
-    // Versiones marcadas: "Pokemon Añil v2.0", "Pokemon Opalo (v1.3.0)".
-    const marked = label.match(/^(.*?)(?:\s*[-–—]\s*|\s+)[(\[]?\s*(?:version|ver|v)\s*\.?\s*(\d+(?:\.\d+){0,3}(?:[-_. ]?(?:alpha|beta|rc)[-_ .]*\d*)?)\s*[)\]]?\s*$/i);
-    if (marked) {
-      const name = marked[1].replace(/[\s._–—-]+$/, '').trim();
-      if (name) return { name, version: marked[2].replace(/\s+/g, '') };
-    }
-
-    // Versiones sin prefijo, pero con separador: "Pokemon Iberia - 2.04".
-    const numeric = label.match(/^(.*?)(?:\s*[-–—]\s*|\s+)[(\[]?\s*(\d+\.\d+(?:\.\d+){0,2})\s*[)\]]?\s*$/i);
-    if (numeric) {
-      const name = numeric[1].replace(/[\s._–—-]+$/, '').trim();
-      if (name) return { name, version: numeric[2] };
-    }
-
-    return { name: label, version: '' };
-  }
-
-  function inferGameFolderInfoFromExecutable(path: string): { name: string; version: string } {
-    const segments = path.trim().replace(/\\/g, '/').split('/').filter(Boolean);
-    if (segments.length) segments.pop(); // descartar nombre del .exe
-
-    const ignoredFolders = new Set([
-      'game', 'games', 'juegos', 'fangames', 'roms', 'downloads', 'download',
-      'desktop', 'escritorio', 'documents', 'documentos', 'projects', 'proyectos',
-      'home', 'users', 'user', 'mnt', 'media', 'data', 'app', 'apps', 'program files',
-      'program files (x86)', 'windows', 'appdata', 'applications', 'steamapps', 'common',
-      'binaries', 'binary', 'bin', 'win64', 'win32', 'x64', 'x86', 'windowsnoeditor',
-      'linux', 'linuxshipping', 'macos', 'mac', 'contents', 'resources', 'www', 'wwwroot',
-      'rpg_rt', 'release', 'debug', 'dist', 'build', 'builds', 'shipping', 'development',
-      'engine', 'ue4', 'ue5', 'client', 'runtime', 'launcher', 'launchers', 'bootstrap',
-      'bootstrapper', 'portable', 'redist', 'repository', 'repos', 'repositorios', 'opt'
-    ]);
-    const boundaries = new Set([
-      'home', 'users', 'user', 'juegos', 'games', 'fangames', 'downloads', 'download',
-      'desktop', 'escritorio', 'documents', 'documentos', 'projects', 'proyectos',
-      'steamapps', 'common', 'program files', 'program files (x86)', 'mnt', 'media',
-      'repos', 'repositorios', 'repository', 'onedrive', 'opt'
-    ]);
-    let nestedVersion = '';
-
-    for (let i = segments.length - 1; i >= 0; i--) {
-      const rawFolder = segments[i].trim();
-      const normalized = rawFolder.replace(/[_]+/g, ' ').replace(/\s+/g, ' ').toLocaleLowerCase();
-      if (boundaries.has(normalized)) break;
-      if (ignoredFolders.has(normalized)) continue;
-
-      const parsed = parseGameFolderLabel(rawFolder);
-      if (!parsed.name && parsed.version) {
-        if (!nestedVersion) nestedVersion = parsed.version;
-        continue;
-      }
-      if (!parsed.name) continue;
-
-      const cleaned = cleanGameNameCandidate(parsed.name).slice(0, 80);
-      if (!cleaned || isGenericExecutableName(cleaned)) continue;
-      return { name: cleaned, version: parsed.version || nestedVersion };
-    }
-
-    return { name: '', version: nestedVersion };
-  }
-
-  function getExecutableFallbackName(path: string): string {
-    const folderInfo = inferGameFolderInfoFromExecutable(path);
-    if (folderInfo.name) return folderInfo.name;
-
-    // Solo recurrir al nombre del ejecutable si la ruta no contiene carpeta de juego reconocible.
-    const normalized = path.replace(/\\/g, '/');
-    const segments = normalized.split('/').filter(Boolean);
-    const filename = segments[segments.length - 1] ?? path;
-    const candidate = cleanGameNameCandidate(filename);
-    return candidate && !isGenericExecutableName(candidate) ? candidate.slice(0, 80) : 'Juego nuevo';
-  }
-
-  function getInstallRootFromExecutable(path: string): string {
-    const normalized = path.replace(/\\/g, '/');
-    const segments = normalized.split('/');
-    if (segments.length > 1) segments.pop();
-
-    const executableFolders = new Set([
-      'bin', 'binaries', 'win32', 'win64', 'x86', 'x64', 'www',
-      'windowsnoeditor', 'linux', 'macos', 'mac', 'contents', 'resources',
-      'game', 'release', 'debug', 'shipping'
-    ]);
-    while (segments.length > 1 && executableFolders.has(segments[segments.length - 1].toLowerCase())) {
-      segments.pop();
-    }
-
-    const root = segments.join('/');
-    return root || (normalized.startsWith('/') ? '/' : '.');
-  }
-
-  function autofillExecutableFields(path: string) {
-    const executablePath = path.trim();
-    if (!executablePath) return;
-    const folderInfo = inferGameFolderInfoFromExecutable(executablePath);
-
-    if (!installPathManuallyEdited || !newInstallPath.trim()) {
-      newInstallPath = getInstallRootFromExecutable(executablePath);
-      installPathManuallyEdited = false;
-    }
-    if (!nameManuallyEdited || !newName.trim()) {
-      newName = folderInfo.name || getExecutableFallbackName(executablePath);
-      nameManuallyEdited = false;
-    }
-    if (folderInfo.version && (!versionManuallyEdited || !newVersion.trim())) {
-      newVersion = folderInfo.version;
-      versionManuallyEdited = false;
-    }
-
-    executableInfo = folderInfo.name
-      ? `Nombre detectado desde la carpeta: ${folderInfo.name}${folderInfo.version ? ` · versión ${folderInfo.version}` : ''}.`
-      : 'No se ha encontrado una carpeta de juego reconocible; se usa el nombre del ejecutable como alternativa.';
-  }
-
-  async function chooseExecutablePath() {
-    try {
-      const selection = await open({
-        multiple: false,
-        title: 'Selecciona el ejecutable del juego'
-      });
-
-      if (typeof selection !== 'string') return;
-      const folderInfo = inferGameFolderInfoFromExecutable(selection);
-      const shouldAutoFillName = !nameManuallyEdited || !newName.trim();
-      const shouldAutoFillVersion = !versionManuallyEdited || !newVersion.trim();
-      newExecutablePath = selection;
-
-      if (shouldAutoFillName) {
-        newName = folderInfo.name || getExecutableFallbackName(selection);
-        nameManuallyEdited = false;
-      }
-      if (shouldAutoFillVersion && folderInfo.version) {
-        newVersion = folderInfo.version;
-        versionManuallyEdited = false;
-      }
-      if (!newVersion.trim()) newVersion = 'Sin especificar';
-      if (!installPathManuallyEdited || !newInstallPath.trim()) {
-        newInstallPath = getInstallRootFromExecutable(selection);
-        installPathManuallyEdited = false;
-      }
-      executableInfo = folderInfo.name
-        ? `Detectado desde la carpeta: ${folderInfo.name}${folderInfo.version ? ` · versión ${folderInfo.version}` : ''}. La carpeta tiene prioridad sobre los metadatos del ejecutable.`
-        : 'Buscando metadatos del ejecutable; si no contiene un nombre útil, se usará el nombre del archivo.';
-      formError = '';
-
-      try {
-        const metadata = await invoke<ExecutableMetadata>('inspect_game_executable', {
-          executablePath: selection
-        });
-        // Ignorar metadatos tardíos de un EXE que ya no está seleccionado.
-        if (newExecutablePath.trim() !== selection) return;
-
-        const metadataName = metadata.name?.trim() ? cleanGameNameCandidate(metadata.name) : '';
-        if (shouldAutoFillName && !folderInfo.name && !nameManuallyEdited && metadataName && !isGenericExecutableName(metadataName)) {
-          newName = metadataName.slice(0, 80);
-          nameManuallyEdited = false;
-        }
-        // Nunca dejar que la versión PE sobrescriba la que figura en la carpeta del juego.
-        if (shouldAutoFillVersion && !folderInfo.version && !versionManuallyEdited && metadata.version?.trim()) {
-          newVersion = metadata.version.trim().slice(0, 30);
-        }
-        if (metadata.companyName?.trim() && !newDeveloper.trim()) {
-          newDeveloper = metadata.companyName.trim().slice(0, 100);
-        }
-        if (metadata.description?.trim() && !newDescription.trim()) {
-          newDescription = metadata.description.trim().slice(0, 3000);
-        }
-
-        if (folderInfo.name) {
-          executableInfo = `Nombre${folderInfo.version ? ' y versión' : ''} obtenidos de la carpeta: ${folderInfo.name}${folderInfo.version ? ` · ${folderInfo.version}` : ''}. Los metadatos internos no los sobrescriben.`;
-        } else if (metadata.version?.trim()) {
-          executableInfo = `Metadatos del ejecutable detectados: ${newName} · versión ${newVersion}.`;
-        } else {
-          executableInfo = 'No se pudo detectar una versión en la carpeta ni en los metadatos. Puedes introducirla manualmente.';
-        }
-      } catch (metadataError) {
-        if (newExecutablePath.trim() !== selection) return;
-        console.warn('No se pudieron leer los metadatos del ejecutable:', metadataError);
-        executableInfo = folderInfo.name
-          ? `Nombre${folderInfo.version ? ' y versión' : ''} detectados desde la carpeta: ${folderInfo.name}${folderInfo.version ? ` · ${folderInfo.version}` : ''}. No se pudieron leer otros metadatos.`
-          : 'Se ha usado la ruta del ejecutable como alternativa; no se pudieron leer los metadatos internos.';
-      }
-    } catch (error) {
-      console.error('Error al seleccionar el ejecutable:', error);
-      formError = 'No se pudo abrir el selector de archivos. Revisa los permisos de Tauri.';
-    }
+    summaryDialog?.close();
+    actionsDialog?.close();
+    formDialog?.openEdit(game);
   }
 
   function playOrConfigure(game: Game) {
     if (!game.executable_path?.trim()) {
       editGame(game);
-      formError = 'Este juego todavía no tiene ejecutable. Selecciona el archivo para activar el botón Jugar.';
+      formDialog?.setError('Este juego todavía no tiene ejecutable. Selecciona el archivo para activar el botón Jugar.');
       return;
     }
 
     void launchGame(game);
   }
 
-  async function saveGame() {
-    const name = newName.trim();
-
-    if (!name) {
-      formError = 'Escribe el nombre del juego para continuar.';
-      return;
-    }
-
-    if (saving) return;
-
-    const game: GameInput = {
-      name,
-      developer: newDeveloper.trim() || 'Desarrollador desconocido',
-      version: newVersion.trim() || 'Sin especificar',
-      type: newType.trim() || 'Fangame',
-      color: newColor,
-      symbol: newSymbol.trim() || '✦',
-      status: newStatus,
-      description: newDescription.trim(),
-      cover: newCover.trim(),
-      official_url: newOfficialUrl.trim(),
-      install_path: newInstallPath.trim(),
-      executable_path: newExecutablePath.trim()
-    };
-
-    saving = true;
-    formError = '';
-
+  async function saveGame(input: GameInput, editingGameId: number | null): Promise<boolean> {
     try {
       if (editingGameId !== null) {
-        await updateGame(editingGameId, game);
+        await updateGame(editingGameId, input);
         notice = 'Ficha actualizada correctamente.';
       } else {
-        await insertGame(game);
+        await insertGame(input);
         notice = 'Juego añadido a la biblioteca.';
       }
 
       await loadGames();
 
-      addDialog?.close();
       navManager.push({ section: 'Biblioteca', announcement: 'Sección Biblioteca' });
       search = '';
-      resetForm();
+      return true;
     } catch (error) {
       console.error('Error al guardar la ficha:', error);
-      formError = 'No se pudo guardar la ficha. Revisa la consola para ver el error.';
-    } finally {
-      saving = false;
+      return false;
     }
   }
 
@@ -719,7 +379,8 @@
     const executablePath = game.executable_path?.trim();
 
     if (!executablePath) {
-      detailDialog?.close();
+      summaryDialog?.close();
+      actionsDialog?.close();
       notice = 'Selecciona primero el ejecutable en Editar ficha.';
       return;
     }
@@ -734,10 +395,10 @@
         executablePath,
         installPath: game.install_path?.trim() ?? ''
       });
-      detailDialog?.close();
+      summaryDialog?.close();
       notice = `Se ha solicitado el inicio de ${game.name}.`;
     } catch (error) {
-      detailDialog?.close();
+      summaryDialog?.close();
       console.error('Error al iniciar el juego:', error);
       notice = typeof error === 'string'
         ? error
@@ -751,53 +412,32 @@
 
 
 
-  // Un diálogo nativo abierto con showModal bloquea el fondo y mantiene el foco dentro de la ficha.
-  $effect(() => {
-    const dialog = gameDialog;
-    if (!dialog) return;
-
-    if (selectedGame && !dialog.open) {
-      dialog.showModal();
-    } else if (!selectedGame && dialog.open) {
-      dialog.close();
-    }
-  });
-
   function openGameDetails(game: Game) {
-    showRemoveConfirm = false;
-    selectedGame = game;
+    actionsDialog?.open(game);
   }
 
   function closeGameDetails() {
-    if (gameDialog?.open) gameDialog.close();
-    selectedGame = null;
-    showRemoveConfirm = false;
+    actionsDialog?.close();
   }
-async function removeSelectedGame() {
-  const gameToRemove = selectedGame;
-  if (!gameToRemove) return;
 
-  try {
-    // Guardar el cambio directamente en SQLite.
-    await hideGame(gameToRemove.id);
+  async function removeSelectedGame(game: Game): Promise<boolean> {
+    try {
+      // Guardar el cambio directamente en SQLite.
+      await hideGame(game.id);
 
-    games = games.filter((game) => game.id !== gameToRemove.id);
-    selectedGame = null;
-    showRemoveConfirm = false;
-    gameDialog?.close();
-
-    notice = `${gameToRemove.name} se ha quitado de la biblioteca.`;
-  } catch (error) {
-    console.error('No se pudo quitar el juego de la biblioteca:', error);
-    notice = 'No se pudo guardar el cambio. Inténtalo de nuevo.';
+      games = games.filter((entry) => entry.id !== game.id);
+      notice = `${game.name} se ha quitado de la biblioteca.`;
+      return true;
+    } catch (error) {
+      console.error('No se pudo quitar el juego de la biblioteca:', error);
+      notice = 'No se pudo guardar el cambio. Inténtalo de nuevo.';
+      return false;
+    }
   }
-}
-  function prepareSelectedGame() {
-    if (!selectedGame) return;
 
-    const gameName = selectedGame.name;
+  function prepareSelectedGame(game: Game) {
     closeGameDetails();
-    notice = `El lanzamiento de ${gameName} estará disponible cuando configuremos sus archivos.`;
+    notice = `El lanzamiento de ${game.name} estará disponible cuando configuremos sus archivos.`;
   }
 
   // Exponer funciones de navegación para pruebas de interfaz (WDIO)
@@ -953,6 +593,7 @@ async function removeSelectedGame() {
           {uninstalling}
           onSelectTheme={selectTheme}
           onUninstall={openUninstallDialog}
+          onLibraryChanged={() => void loadGames()}
         />
       {/if}
 
@@ -971,283 +612,25 @@ async function removeSelectedGame() {
   </main>
 </div>
 
-<!-- Modal para añadir y editar fichas -->
-<dialog
-  bind:this={addDialog}
-  use:scrollLockDialog
-  class="modal"
-  aria-labelledby="modal-title"
-  onclick={(event) => {
-    if (event.target === addDialog) addDialog?.close();
-  }}
->
-  <div class="modal-top">
-    <div class="modal-icon">{editingGameId !== null ? '✎' : '＋'}</div>
-    <button class="modal-close" aria-label="Cerrar" onclick={() => addDialog?.close()}>×</button>
-  </div>
+<GameFormDialog
+  bind:this={formDialog}
+  {systemInfo}
+  colorSeed={games.length}
+  onSubmit={saveGame}
+/>
 
-  <div class="section-kicker">{editingGameId !== null ? 'ACTUALIZA LA INFORMACIÓN' : 'AMPLÍA TU COLECCIÓN'}</div>
-  <h2 id="modal-title">{editingGameId !== null ? 'Editar ficha.' : 'Añadir un juego.'}</h2>
-  <p class="modal-description">
-    Guarda la información de tu fangame. Puedes completar los datos técnicos más adelante.
-  </p>
+<GameSummaryDialog
+  bind:this={summaryDialog}
+  {launchingGameId}
+  onEdit={editGame}
+  onLaunch={launchGame}
+/>
 
-  <form data-testid="add-game-form" onsubmit={(event) => { event.preventDefault(); void saveGame(); }}>
-    <div class="form-grid">
-      <label class="form-label full-width">
-        Nombre del juego <span>*</span>
-        <input bind:value={newName} data-testid="game-name-input" placeholder="Ej. Pokémon Eclipse" required maxlength="80" oninput={() => (nameManuallyEdited = true)} />
-      </label>
-
-      <label class="form-label">
-        Desarrollador
-        <input bind:value={newDeveloper} data-testid="game-developer-input" placeholder="Creador o equipo" maxlength="100" />
-      </label>
-
-      <label class="form-label">
-        Versión
-        <input bind:value={newVersion} placeholder="Ej. 1.0" maxlength="30" oninput={() => (versionManuallyEdited = true)} />
-      </label>
-
-      <label class="form-label">
-        Tipo de juego
-        <select bind:value={newType}>
-          <option value="Fangame">Fangame</option>
-          <option value="ROM Hack">ROM Hack</option>
-          <option value="RPG">RPG</option>
-          <option value="Aventura">Aventura</option>
-          <option value="Otro">Otro</option>
-        </select>
-      </label>
-
-      <label class="form-label">
-        Estado
-        <select bind:value={newStatus}>
-          <option value="En biblioteca">En biblioteca</option>
-          <option value="Instalado">Instalado</option>
-          <option value="En progreso">En progreso</option>
-          <option value="Completado">Completado</option>
-          <option value="Pendiente">Pendiente</option>
-        </select>
-      </label>
-
-      <label class="form-label full-width">
-        Descripción
-        <textarea bind:value={newDescription} data-testid="game-description-input" placeholder="Historia, características, región, generación..." rows="4" maxlength="3000"></textarea>
-      </label>
-
-      <label class="form-label full-width">
-        URL de la portada
-        <input bind:value={newCover} type="url" placeholder="https://ejemplo.com/portada.png" maxlength="1000" />
-        <span class="field-help">Por ahora, la portada debe ser una imagen accesible mediante una URL HTTP o HTTPS.</span>
-      </label>
-
-      <label class="form-label full-width">
-        Web oficial o página del proyecto
-        <input bind:value={newOfficialUrl} type="url" placeholder="https://..." maxlength="1000" />
-      </label>
-
-      <div class="form-label full-width">
-        <label for="executable-path">Ruta del ejecutable</label>
-        <div class="path-input-row">
-          <input id="executable-path" bind:value={newExecutablePath} placeholder={systemInfo?.os === 'windows' ? 'C:\\Juegos\\NombreDelJuego\\Game.exe' : '/home/usuario/Juegos/NombreDelJuego/Game.exe'} maxlength="1000" onchange={() => autofillExecutableFields(newExecutablePath)} />
-          <button type="button" class="path-button" onclick={() => void chooseExecutablePath()}>Elegir archivo</button>
-        </div>
-        <span class="field-help">Al elegir un ejecutable, DexDeck intenta detectar el nombre y la versión de los archivos Windows (.exe), y calcula la carpeta raíz desde su ruta. Los campos siguen siendo editables.</span>
-        {#if executableInfo}
-          <span class="field-help executable-info" role="status">{executableInfo}</span>
-        {/if}
-      </div>
-
-      <div class="form-label full-width">
-        <label for="install-path">Ruta de instalación</label>
-        <div class="path-input-row">
-          <input id="install-path" bind:value={newInstallPath} placeholder={systemInfo?.os === 'windows' ? 'C:\\Juegos\\NombreDelJuego' : '/home/usuario/Juegos/NombreDelJuego'} maxlength="1000" oninput={() => (installPathManuallyEdited = true)} />
-          <button type="button" class="path-button" onclick={() => void chooseInstallPath()}>Elegir carpeta</button>
-        </div>
-        <span class="field-help">Selecciona la carpeta donde se encuentran los archivos del juego. También puedes escribir la ruta manualmente.</span>
-      </div>
-
-      <label class="form-label">
-        Color de la tarjeta
-        <select bind:value={newColor}>
-          <option value="blue">Azul</option>
-          <option value="purple">Morado</option>
-          <option value="red">Rojo</option>
-        </select>
-      </label>
-
-      <label class="form-label">
-        Símbolo
-        <select bind:value={newSymbol}>
-          <option value="✦">✦ Estrella</option>
-          <option value="◇">◇ Diamante</option>
-          <option value="✧">✧ Destello</option>
-          <option value="◈">◈ Cristal</option>
-          <option value="★">★ Estrella sólida</option>
-        </select>
-      </label>
-    </div>
-
-    {#if formError}
-      <p class="form-notice" role="alert" data-testid="form-error">{formError}</p>
-    {/if}
-
-    <div class="modal-actions">
-      <button type="button" class="secondary-button" onclick={() => addDialog?.close()}>Cancelar</button>
-      <button type="submit" class="primary-button" data-testid="save-game-button" disabled={saving}>
-        {saving ? 'Guardando…' : editingGameId !== null ? 'Guardar cambios' : 'Añadir a la biblioteca'}
-        <span>→</span>
-      </button>
-    </div>
-  </form>
-</dialog>
-
-<!-- Ficha de consulta -->
-<dialog
-  bind:this={detailDialog}
-  use:scrollLockDialog
-  class="modal detail-modal"
-  data-testid="game-detail-dialog"
-  aria-labelledby="detail-title"
-  onclose={() => (detailGame = null)}
-  onclick={(event) => {
-    if (event.target === detailDialog) detailDialog?.close();
-  }}
->
-  {#if detailGame}
-    <div class="modal-top">
-      <div class="modal-icon">◇</div>
-      <button class="modal-close" aria-label="Cerrar ficha" onclick={() => detailDialog?.close()}>×</button>
-    </div>
-
-    <div class="section-kicker">DEXDECK COLLECTION · FICHA DEL JUEGO</div>
-    <h2 id="detail-title">{detailGame.name}</h2>
-    <p class="modal-description">
-      {detailGame.developer} · Versión {detailGame.version}
-    </p>
-
-    {#if detailGame.cover && isWebUrl(detailGame.cover)}
-      <img class="detail-cover" src={detailGame.cover} alt={`Portada de ${detailGame.name}`} />
-    {/if}
-
-    <div class="detail-badges">
-      <span class="game-tag">{detailGame.type}</span>
-      <span class="game-tag">{detailGame.status}</span>
-      <span class="game-tag">v{detailGame.version}</span>
-    </div>
-
-    <section class="detail-section">
-      <h3>Descripción</h3>
-      <p class="detail-text">
-        {detailGame.description || 'Todavía no has añadido una descripción para este juego.'}
-      </p>
-    </section>
-
-    <section class="detail-section">
-      <h3>Enlaces y archivos</h3>
-
-      <div class="detail-field">
-        <span>Web oficial</span>
-        {#if detailGame.official_url && isWebUrl(detailGame.official_url)}
-          <a href={detailGame.official_url} target="_blank" rel="noreferrer">{detailGame.official_url}</a>
-        {:else}
-          <p>Sin especificar</p>
-        {/if}
-      </div>
-
-      <div class="detail-field">
-        <span>Ruta de instalación</span>
-        <p class="path-value">{detailGame.install_path || 'Sin especificar'}</p>
-      </div>
-
-      <div class="detail-field">
-        <span>Ejecutable</span>
-        <p class="path-value">{detailGame.executable_path || 'Sin especificar'}</p>
-      </div>
-    </section>
-
-    <div class="modal-actions">
-      <button type="button" class="secondary-button" onclick={() => detailDialog?.close()}>Cerrar</button>
-      <button type="button" class="secondary-button" onclick={() => editGame(detailGame!)}>
-        Configurar detalles <span>⚙</span>
-      </button>
-      <button
-        type="button"
-        class="primary-button"
-        disabled={launchingGameId !== null}
-        onclick={() => void launchGame(detailGame!)}
-      >
-        {launchingGameId === detailGame.id ? 'Iniciando…' : 'Jugar'} <span>▶</span>
-      </button>
-    </div>
-  {/if}
-</dialog>
-
-{#if selectedGame}
-  <dialog
-    bind:this={gameDialog}
-    use:scrollLockDialog
-    class="modal game-details-modal"
-    data-testid="game-details-dialog"
-    aria-labelledby="game-modal-title"
-    onclose={() => {
-      selectedGame = null;
-      showRemoveConfirm = false;
-    }}
-    onclick={(event) => {
-      if (event.target === gameDialog) gameDialog?.close();
-    }}
-  >
-    {#if selectedGame}
-      {#if showRemoveConfirm}
-        <div class="remove-confirm-content">
-          <div class="modal-top">
-            <div class="modal-icon remove-icon">!</div>
-            <button class="modal-close" aria-label="Volver a la ficha" onclick={() => showRemoveConfirm = false}>×</button>
-          </div>
-          <div class="section-kicker">CONFIRMAR ACCIÓN</div>
-          <h2 id="game-modal-title">¿Quitar {selectedGame.name}?</h2>
-          <p class="modal-description">
-            Se eliminará de tu biblioteca de DexDeck. Esta acción no borra los archivos del juego de tu disco.
-          </p>
-          <div class="modal-actions">
-            <button type="button" class="secondary-button" onclick={() => showRemoveConfirm = false}>Cancelar</button>
-            <button type="button" class="danger-button" onclick={removeSelectedGame}>Quitar de la biblioteca</button>
-          </div>
-        </div>
-      {:else}
-        <div class={`game-details-hero art-${selectedGame.color}`}>
-          <div class="art-grid"></div>
-          <div class="art-glow"></div>
-          <div class="art-orbit orbit-a"></div>
-          <div class="art-orbit orbit-b"></div>
-          <div class="art-emblem">{selectedGame.symbol}</div>
-          <button class="modal-close details-close" aria-label="Cerrar ficha" onclick={closeGameDetails}>×</button>
-          <div class="details-hero-copy">
-            <span>DEXDECK COLLECTION</span>
-            <h2 id="game-modal-title">{selectedGame.name}</h2>
-            <p>{selectedGame.developer}</p>
-          </div>
-        </div>
-        <div class="game-details-body">
-          <div class="section-kicker">DETALLES DEL JUEGO</div>
-          <div class="details-meta-grid">
-            <div class="details-meta-item"><span>Tipo</span><strong>{selectedGame.type}</strong></div>
-            <div class="details-meta-item"><span>Versión</span><strong>{selectedGame.version}</strong></div>
-            <div class="details-meta-item"><span>Estado</span><strong>{selectedGame.status}</strong></div>
-          </div>
-          <p class="details-note">DexDeck todavía no gestiona los archivos instalados. Desde aquí puedes preparar el lanzamiento (cuando esté configurado) o quitar esta entrada de la biblioteca sin borrar el juego del disco.</p>
-          <div class="game-details-actions">
-            <button type="button" class="primary-button" onclick={prepareSelectedGame}><span>▶</span> Preparar para jugar</button>
-            <button type="button" class="secondary-button" onclick={() => showRemoveConfirm = true}>Quitar de biblioteca</button>
-          </div>
-        </div>
-      {/if}
-    {/if}
-  </dialog>
-{/if}
-
+<GameActionsDialog
+  bind:this={actionsDialog}
+  onPrepare={prepareSelectedGame}
+  onRemove={removeSelectedGame}
+/>
 
 <dialog
   bind:this={uninstallDialog}
